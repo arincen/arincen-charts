@@ -11,6 +11,13 @@ import { defineConfig } from 'vitepress';
  */
 export default defineConfig({
     base: '/charts/',
+
+    // Built into a `charts` folder rather than the root of dist. Cloudflare
+    // Pages serves the output directory at the domain root, so a base path
+    // alone would rewrite every URL to /charts/ while the files sat one level
+    // above it — every asset a 404, and the router falling through to the
+    // not-found page.
+    outDir: '.vitepress/dist/charts',
     lang: 'en-US',
     title: 'Arincen Charts',
     description: 'A financial chart in about 14 KB, with zero dependencies.',

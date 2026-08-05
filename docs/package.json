@@ -6,7 +6,7 @@
     "description": "Documentation site for Arincen Charts, deployed to docs.arincen.com/charts.",
     "scripts": {
         "dev": "vitepress dev",
-        "build": "vitepress build",
+        "build": "vitepress build && node write-redirects.mjs",
         "preview": "vitepress preview"
     },
     "devDependencies": {
