@@ -1,0 +1,25 @@
+Arincen Charts
+Copyright (c) 2026 Arincen L.L.C-FZ - Licence No. 2420098.01
+
+Attribution
+-----------
+
+Arincen Charts is MIT licensed, so attribution is a request rather than a
+condition — deliberately. Where you use it to render charts in a public-facing
+product, we would appreciate either keeping the attribution mark the library
+shows by default, or crediting "Arincen Charts" visibly near the chart.
+
+No particular wording or placement is asked for, and no link attribute is
+requested. If you would like to be listed among the products built with it,
+tell us and we will add you.
+
+Acknowledgement
+---------------
+
+Lightweight Charts(TM) is a trademark of TradingView, Inc. This project is not
+affiliated with, endorsed by, or sponsored by TradingView.
+
+Parts of this library's API surface, and some rendering constants governing
+candle widths and axis tick spacing, are modelled on lightweight-charts, which
+is distributed by TradingView, Inc. under the Apache License 2.0. That licence
+grants no trademark rights, and none are claimed here.
