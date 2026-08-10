@@ -24,9 +24,9 @@ const scaleOptions = () => ({ scaleMargins: { top: 0.2, bottom: 0.1 }, mode: 0 }
  * stub is enough — which is the point of their being free functions rather
  * than methods, and is also what keeps them out of the light bundle.
  */
-function chartWith(stretchFactors, height = 400) {
+function chartWith(stretchFactors, height = 400, fontSize = 12) {
     const chart = {
-        options: { rightPriceScale: scaleOptions() },
+        options: { rightPriceScale: scaleOptions(), layout: { fontSize } },
         plot: { left: 0, top: 0, right: 600, bottom: height },
         scheduleRender: () => {},
     };
@@ -138,6 +138,30 @@ test('a pane cannot be dragged out of existence', () => {
     for (const height of heightsOf(chart)) {
         assert.ok(height >= 25, `a pane was crushed to ${height}px`);
     }
+});
+
+/**
+ * The floor is two and a half lines of the chart's own type rather than a fixed
+ * count of pixels, so a chart set large keeps a pane you can still read. Two
+ * charts of identical height, differing only in font size, must not be draggable
+ * to the same minimum.
+ */
+test('the smallest a pane can be dragged follows the type size', () => {
+    const crush = (fontSize) => {
+        const chart = chartWith([2, 1], 400, fontSize);
+        const edge = chart.panes[0].plot.bottom;
+
+        resizePanes(chart, 0, edge - 10000, resizeSnapshot(chart, 0, edge));
+        layoutPanes(chart);
+
+        return Math.min(...heightsOf(chart));
+    };
+
+    const small = crush(12);
+    const large = crush(24);
+
+    assert.ok(small >= 25 && small <= 35, `a 12px chart floored at ${small}px`);
+    assert.ok(large > small + 20, `a 24px chart floored at ${large}px, barely above the 12px chart's ${small}px`);
 });
 
 /**

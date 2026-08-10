@@ -9,9 +9,10 @@ import {
 } from './series.js';
 
 export { createSeriesMarkers } from './index.js';
-export { LineStyle, CrosshairMode, PriceScaleMode } from './options.js';
+export { LineStyle, LineType, LastPriceAnimationMode, PriceLineSource, CrosshairMode, PriceScaleMode } from './options.js';
 export { FULL_BUILD } from './flags.js';
-export { createTextWatermark } from './watermark.js';
+export { createTextWatermark, createImageWatermark } from './watermark.js';
+export { createUpDownMarkers } from './up-down-markers.js';
 export {
     LineSeries,
     AreaSeries,

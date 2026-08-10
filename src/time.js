@@ -136,14 +136,52 @@ function pad(value) {
 }
 
 /**
+ * Fills a caller's date pattern.
+ *
+ * The vocabulary is the one anybody arriving from another charting library
+ * already has in their fingers — `yyyy`, `MM`, `dd` and the rest. Longest
+ * tokens are replaced first, or `yyyy` would be eaten twice by `yy`.
+ *
+ * @param {string} pattern
+ * @param {number} timestamp
+ * @param {string} locale
+ * @return {string}
+ */
+export function formatDatePattern(pattern, timestamp, locale) {
+    const parts = utcParts(timestamp);
+    const month = (options) => intlFormatter(locale, options).format(timestamp * 1000);
+
+    const tokens = {
+        yyyy: String(parts.year),
+        yy: String(parts.year).slice(-2),
+        MMMM: month({ month: 'long' }),
+        MMM: month({ month: 'short' }),
+        MM: pad(parts.month + 1),
+        dd: pad(parts.day),
+        d: String(parts.day),
+        HH: pad(parts.hour),
+        mm: pad(parts.minute),
+    };
+
+    return pattern.replace(/yyyy|yy|MMMM|MMM|MM|dd|d|HH|mm/g, (token) => tokens[token]);
+}
+
+/**
  * @param {number} timestamp
  * @param {number} weight
- * @param {{locale: string, spanSeconds: number}} context
+ * @param {{locale: string, spanSeconds: number, dateFormat: (string|null)}} context
  * @return {string}
  */
 export function formatTick(timestamp, weight, context) {
-    const { locale, spanSeconds } = context;
+    const { locale, spanSeconds, dateFormat } = context;
     const parts = utcParts(timestamp);
+
+    // A pattern replaces the whole ladder, deliberately: a caller who has said
+    // exactly how a date should read does not want a different answer at every
+    // zoom level, which is the ladder's entire purpose.
+    if (dateFormat && weight >= TickWeight.Day) {
+        return formatDatePattern(dateFormat, timestamp, locale);
+    }
 
     if (weight >= TickWeight.Year) {
         return String(parts.year);

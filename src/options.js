@@ -6,6 +6,37 @@ export const LineStyle = {
     SparseDotted: 4,
 };
 
+export const LineType = {
+    /** Straight segments between points. */
+    Simple: 0,
+    /**
+     * A staircase: the value holds until the next point, then jumps.
+     *
+     * The honest shape for anything that changes at moments rather than
+     * continuously — a policy rate, a dividend per share, a position size.
+     * Drawing those as diagonals says the value glided between the readings,
+     * which is not what happened.
+     */
+    WithSteps: 1,
+    /** A smooth curve through the points. */
+    Curved: 2,
+};
+
+export const LastPriceAnimationMode = {
+    Disabled: 0,
+    /** Always pulsing, so a live price is visibly live. */
+    Continuous: 1,
+    /** Pulses once each time the value changes. */
+    OnDataUpdate: 2,
+};
+
+export const PriceLineSource = {
+    /** The last bar in the data, whether or not it is on screen. */
+    LastBar: 0,
+    /** The last bar currently in view, so the line follows a scroll back. */
+    LastVisible: 1,
+};
+
 export const CrosshairMode = {
     /** Follows the pointer exactly; the price it reports is wherever you are. */
     Normal: 0,
@@ -41,6 +72,10 @@ export function leftScaleDefaults() {
         borderColor: '#d6dcde',
         scaleMargins: { top: 0.2, bottom: 0.1 },
         minimumWidth: 0,
+        ticksVisible: false,
+        alignLabels: true,
+        entireTextOnly: false,
+        invertScale: false,
     };
 }
 
@@ -55,11 +90,24 @@ export function chartDefaults() {
             fontSize: 12,
             fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
             attributionLogo: true,
+
+            // Passed to the canvas. `display-p3` on a screen that has the
+            // gamut renders colours a plugin author picked in a wide-gamut
+            // tool as they picked them, instead of flattened into sRGB.
+            colorSpace: 'srgb',
         },
         localization: {
             locale: 'en',
             priceFormatter: null,
             timeFormatter: null,
+
+            // A pattern in the vocabulary a caller expects — yyyy, MM, dd and
+            // friends — for the dates on the axis and in the crosshair badge.
+            dateFormat: null,
+
+            // Percentage and indexed axes print through this when it is set,
+            // so a caller can decide how many decimals a move deserves.
+            percentageFormatter: null,
         },
         grid: {
             vertLines: { visible: true, color: '#e6e6e6', style: LineStyle.Solid },
@@ -83,6 +131,13 @@ export function chartDefaults() {
                 labelVisible: true,
                 labelBackgroundColor: '#131722',
             },
+
+            // Ours defaults the other way round from theirs, deliberately.
+            // Their crosshair snaps to the data points of hidden series unless
+            // told not to, and a crosshair sticking to a reading nobody can see
+            // is a magnet pulling towards nothing. The option exists so a
+            // caller who wants their behaviour can ask for it.
+            doNotSnapToHiddenSeriesIndices: true,
         },
         rightPriceScale: {
             visible: true,
@@ -93,6 +148,22 @@ export function chartDefaults() {
             borderColor: '#d6dcde',
             scaleMargins: { top: 0.2, bottom: 0.1 },
             minimumWidth: 0,
+
+            // A small mark joining each label to the axis line.
+            ticksVisible: false,
+
+            // Nudge overlapping badges apart rather than letting them stack
+            // into an unreadable pile.
+            alignLabels: true,
+
+            // Drop a corner label rather than clip it. A half-shown price is
+            // read as a whole one, which is worse than no label at all.
+            entireTextOnly: false,
+
+            // Upside down, so a falling market reads as a rising line. A
+            // convention some desks work in, and the only way to see a spread
+            // the way the other side of it does.
+            invertScale: false,
         },
         timeScale: {
             visible: true,
@@ -104,7 +175,37 @@ export function chartDefaults() {
             fixRightEdge: false,
             rightOffset: 0,
             barSpacing: 6,
+
+            // Follow new bars only while the newest one is on screen. A reader
+            // who has scrolled back into history did not ask to be dragged
+            // forward every time a tick arrives.
+            shiftVisibleRangeOnNewBar: true,
             minBarSpacing: 0.5,
+
+            // Zero means no ceiling, matching the convention a caller will
+            // already have met: an option that clamps is off when it is nought,
+            // not when it is absent.
+            maxBarSpacing: 0,
+
+            // Given the timestamp, the weight of the boundary it crosses and
+            // the locale, and expected to return a string — or nothing, to let
+            // the built-in formatting answer.
+            tickMarkFormatter: null,
+
+            // A small mark joining each label to the axis line.
+            ticksVisible: false,
+
+            // Let the coarsest boundary on screen be set in bold.
+            allowBoldLabels: true,
+
+            // Hold the framing through a resize rather than keeping the bar
+            // width. A dashboard that reflows panels wants the same span of
+            // time in a narrower box, not the same bars with fewer of them.
+            lockVisibleTimeRangeOnResize: false,
+
+            // Keep the bar under the pointer under the pointer while the wheel
+            // zooms, instead of anchoring the zoom to the right edge.
+            rightBarStaysOnScroll: false,
         },
         handleScroll: {
             mouseWheel: true,
@@ -116,6 +217,9 @@ export function chartDefaults() {
             mouseWheel: true,
             pinch: true,
             axisPressedMouseMove: true,
+
+            // Double-clicking an axis hands it back to automatic scaling.
+            axisDoubleClickReset: true,
         },
     };
 }

@@ -7,7 +7,7 @@ import {
     HistogramSeries,
     BaselineSeries,
 } from './series.js';
-import { LineStyle, CrosshairMode, PriceScaleMode } from './options.js';
+import { LineStyle, LineType, PriceLineSource, CrosshairMode, PriceScaleMode } from './options.js';
 
 /**
  * Entry point for the `<script>` tag build.
@@ -41,7 +41,10 @@ export {
     CandlestickSeries,
     BarSeries,
     HistogramSeries,
+    BaselineSeries,
     LineStyle,
+    LineType,
+    PriceLineSource,
     CrosshairMode,
     PriceScaleMode,
 };

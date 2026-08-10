@@ -4,7 +4,9 @@ import {
     mergeOptions,
     applyLineStyle,
     CrosshairMode,
+    LastPriceAnimationMode,
     LineStyle,
+    PriceLineSource,
     PriceScaleMode,
 } from './options.js';
 import { FULL_BUILD } from './flags.js';
@@ -27,13 +29,17 @@ import {
 } from './panes.js';
 import { toTimestamp, tickWeight, formatTick, formatCrosshairTime, TickWeight } from './time.js';
 import { normalisePoint } from './series.js';
+import { buildConflationLevels, conflationStep, levelFor } from './conflation.js';
 import { drawMarkers, nearestIndex } from './markers.js';
 import { createRenderTarget, drawPrimitives } from './render-target.js';
 import { contrastTextColor } from './colors.js';
-import { trackingPoint, startKineticScroll } from './touch.js';
+import { createLongPress, trackingPoint, startKineticScroll } from './touch.js';
 import { createAttributionMark } from './mark.js';
 
 const LABEL_PADDING_X = 6;
+
+/** Length of the mark joining an axis label to its line. */
+const TICK_MARK = 4;
 const AXIS_PADDING = 12;
 const TICK_GAP = 46;
 const MIN_CLASS_SPACING = 20;
@@ -41,25 +47,35 @@ const MARKER_HEADROOM = 28;
 const WHEEL_DELTA_LINE = 1;
 const WHEEL_DELTA_PAGE = 2;
 
+/** One detent of a wheel, in each of the three units a browser may report. */
+const PIXELS_PER_NOTCH = 100;
+const LINES_PER_NOTCH = 3;
+const PAGES_PER_NOTCH = 1;
+
 /**
- * Normalises a wheel delta to a -1..1 zoom step, flattening the difference
- * between pixel, line and page delta modes.
+ * How far the wheel turned, in notches, as a -1..1 zoom step.
+ *
+ * A wheel event reports its delta in one of three units and the browser
+ * decides which, so the question to answer is not "how many pixels" but "how
+ * much of one detent is this", after which every device is comparable:
+ *
+ *   pixels — a detent is ~100px, which is what Chrome and Safari emit
+ *   lines  — a detent is 3 lines, which is what Firefox emits
+ *   pages  — a detent is one page
+ *
+ * Clamped to a single notch so a trackpad, which fires dozens of small events
+ * per gesture, cannot outrun a mouse that fires one large one.
  *
  * @param {WheelEvent} event
  * @return {number}
  */
 export function wheelZoomStep(event) {
-    let scale = 1;
+    const perNotch = event.deltaMode === WHEEL_DELTA_LINE
+        ? LINES_PER_NOTCH
+        : (event.deltaMode === WHEEL_DELTA_PAGE ? PAGES_PER_NOTCH : PIXELS_PER_NOTCH);
+    const notches = -event.deltaY / perNotch;
 
-    if (event.deltaMode === WHEEL_DELTA_LINE) {
-        scale = 32;
-    } else if (event.deltaMode === WHEEL_DELTA_PAGE) {
-        scale = 120;
-    }
-
-    const delta = -(event.deltaY / 100) * scale;
-
-    return Math.sign(delta) * Math.min(1, Math.abs(delta));
+    return Math.sign(notches) * Math.min(1, Math.abs(notches));
 }
 
 /**
@@ -70,8 +86,12 @@ export function wheelZoomStep(event) {
  * never 63.31. Falling back to the scale's own precision keeps every series
  * that never asked for a format looking exactly as it did.
  *
+ * Positional, so `series` is passed as `undefined` rather than left out — it
+ * was declared optional with a required parameter after it, which no
+ * declaration file can express and every caller had never relied on.
+ *
  * @param {number} price
- * @param {Object} [series]
+ * @param {Object|undefined} series
  * @param {number} fallbackPrecision
  * @return {string}
  */
@@ -154,6 +174,51 @@ export function seriesPriceRange(series, from, to) {
 }
 
 /**
+ * Widens a range to take in whatever the series' primitives say they need.
+ *
+ * A primitive that draws above the data — a target, a projection, a band —
+ * is otherwise clipped at the top of the pane, and the reader is looking at a
+ * chart that is quietly not showing them the thing the plugin exists to show.
+ *
+ * Only ever widens. A primitive returning a narrower range would be asking the
+ * chart to hide the price, which is not a primitive's decision to make.
+ *
+ * @param {Object[]} primitives
+ * @param {{minValue: number, maxValue: number}|null} range
+ * @param {number} from logical index
+ * @param {number} to
+ * @return {{minValue: number, maxValue: number}|null}
+ */
+export function widenForPrimitives(primitives, range, from, to) {
+    let widened = range;
+
+    for (const primitive of primitives) {
+        let info;
+
+        try {
+            info = primitive.autoscaleInfo?.(from, to);
+        } catch {
+            continue;
+        }
+
+        const priceRange = info?.priceRange;
+
+        if (! priceRange || ! Number.isFinite(priceRange.minValue) || ! Number.isFinite(priceRange.maxValue)) {
+            continue;
+        }
+
+        widened = widened === null
+            ? { minValue: priceRange.minValue, maxValue: priceRange.maxValue }
+            : {
+                minValue: Math.min(widened.minValue, priceRange.minValue),
+                maxValue: Math.max(widened.maxValue, priceRange.maxValue),
+            };
+    }
+
+    return widened;
+}
+
+/**
  * Hands a series' own range to its `autoscaleInfoProvider` and takes back
  * whatever that decides.
  *
@@ -191,7 +256,11 @@ export function applyAutoscaleProvider(series, range) {
     };
 }
 
-const MAGNET_CLOSE = ['value'];
+// A line-shaped point carries `value` and a bar-shaped one carries `close`;
+// both are "the price this bar ended at", which is what the plain magnet snaps
+// to. Listing only `value` left every candlestick chart unmagnetised in the
+// default mode, silently, because nothing snapped rather than snapping wrongly.
+const MAGNET_CLOSE = ['value', 'close'];
 const MAGNET_OHLC = ['open', 'high', 'low', 'close'];
 
 /**
@@ -209,7 +278,7 @@ const MAGNET_OHLC = ['open', 'high', 'low', 'close'];
  * @param {number} mode
  * @return {number|null}
  */
-export function magnetPrice(pane, index, y, mode) {
+export function magnetPrice(pane, index, y, mode, skipHidden = true) {
     if (mode !== CrosshairMode.Magnet && mode !== CrosshairMode.MagnetOHLC) {
         return null;
     }
@@ -219,7 +288,7 @@ export function magnetPrice(pane, index, y, mode) {
     let shortest = Infinity;
 
     for (const series of pane.series) {
-        if (! series.options.visible) {
+        if (skipHidden && ! series.options.visible) {
             continue;
         }
 
@@ -264,6 +333,356 @@ function refreshPrimitives(primitives) {
     }
 }
 
+/**
+ * Adds each primitive's price-axis labels to the badges the axis will paint.
+ *
+ * A view is asked for its coordinate rather than for a price, because the
+ * thing it is labelling need not be a price at all — a plugin marking a
+ * measured distance knows where its label goes in pixels and would have to
+ * invert the scale to express that as a number the axis then converts back.
+ *
+ * @param {Object[]} primitives
+ * @param {Object} record price-scale record the axis belongs to
+ * @param {Object} pane
+ * @param {Object[]} badges collected so far, appended to in place
+ */
+function collectPrimitiveBadges(primitives, record, pane, badges) {
+    for (const primitive of primitives) {
+        let views;
+
+        try {
+            views = primitive.priceAxisViews?.() ?? [];
+        } catch {
+            continue;
+        }
+
+        for (const view of views) {
+            try {
+                if (view.visible?.() === false) {
+                    continue;
+                }
+
+                const y = view.fixedCoordinate?.() ?? view.coordinate();
+
+                // Off-scale labels are dropped rather than clamped to the
+                // edge, which would claim the axis reaches somewhere it does
+                // not — the same rule the caller's price lines follow.
+                if (! Number.isFinite(y) || y < pane.plot.top || y > pane.plot.bottom) {
+                    continue;
+                }
+
+                badges.push({
+                    y,
+                    text: view.text(),
+                    background: view.backColor(),
+                    textColor: view.textColor(),
+                    title: '',
+
+                    // Documented on their axis view and accepted by ours since
+                    // the day primitives landed, while doing nothing at all. A
+                    // plugin author setting a field and seeing no change has
+                    // been told a lie about the contract.
+                    tick: view.tickVisible?.() !== false,
+                });
+            } catch {
+                // One broken view costs its own label, not the axis.
+            }
+        }
+    }
+}
+
+/**
+ * The same for the time axis, where the coordinate is a distance from the left.
+ *
+ * @param {Object[]} primitives
+ * @param {Object[]} labels collected so far, appended to in place
+ */
+function collectTimeAxisLabels(primitives, labels) {
+    for (const primitive of primitives) {
+        let views;
+
+        try {
+            views = primitive.timeAxisViews?.() ?? [];
+        } catch {
+            continue;
+        }
+
+        for (const view of views) {
+            try {
+                if (view.visible?.() === false) {
+                    continue;
+                }
+
+                const x = view.fixedCoordinate?.() ?? view.coordinate();
+
+                if (Number.isFinite(x)) {
+                    labels.push({ x, text: view.text(), background: view.backColor(), textColor: view.textColor() });
+                }
+            } catch {
+                // One broken view costs its own label, not the axis.
+            }
+        }
+    }
+}
+
+/**
+ * The two strips outside the plot that a primitive may draw into.
+ *
+ * A pure function of the layout rather than a block inside the drawing code,
+ * because geometry that only exists inside a method needs a real browser to
+ * check — and a strip that came out empty, or that reached back over the plot,
+ * would paint nothing or paint on top of the chart while every test still
+ * passed.
+ *
+ * Each is expressed as its own rectangle so a renderer's coordinates start at
+ * the strip's corner rather than the canvas's.
+ *
+ * @param {{left: number, top: number, right: number, bottom: number}} plot
+ * @param {number} width whole canvas, CSS px
+ * @param {number} height
+ * @return {{views: string, left: number, top: number, width: number, height: number}[]}
+ */
+export function axisStrips(plot, width, height) {
+    return [
+        {
+            views: 'priceAxisPaneViews',
+            left: plot.right,
+            top: plot.top,
+            width: Math.max(0, width - plot.right),
+            height: Math.max(0, plot.bottom - plot.top),
+        },
+        {
+            views: 'timeAxisPaneViews',
+            left: plot.left,
+            top: plot.bottom,
+            width: Math.max(0, plot.right - plot.left),
+            height: Math.max(0, height - plot.bottom),
+        },
+    ];
+}
+
+/** One breath of the last-price ring. */
+const PULSE_PERIOD_MS = 2600;
+const PULSE_DOT_RADIUS = 4;
+const PULSE_REACH = 11;
+
+/**
+ * How far through a single pulse we are, or null when there is none running.
+ *
+ * Separated from the drawing so the timing can be tested without a canvas —
+ * an animation that quietly never ends is a chart that quietly never stops
+ * asking for frames, which is a battery complaint rather than a visible bug.
+ *
+ * @param {number} startedAt
+ * @param {number} now
+ * @return {number|null} 0..1
+ */
+export function pulsePhase(startedAt, now) {
+    if (! startedAt) {
+        return null;
+    }
+
+    const elapsed = now - startedAt;
+
+    return elapsed < 0 || elapsed >= PULSE_PERIOD_MS ? null : elapsed / PULSE_PERIOD_MS;
+}
+
+/** The same, for a series that should always look live. */
+export function continuousPhase(now) {
+    return ((now % PULSE_PERIOD_MS) + PULSE_PERIOD_MS) % PULSE_PERIOD_MS / PULSE_PERIOD_MS;
+}
+
+/**
+ * A solid dot with a ring expanding and fading away from it.
+ *
+ * The ring carries the movement and the dot stays put, so the eye is drawn to
+ * the point rather than to the animation — the opposite arrangement reads as a
+ * loading spinner sitting on the price.
+ */
+function drawPulse(ctx, x, y, progress, colour) {
+    ctx.save();
+    ctx.fillStyle = colour;
+    ctx.globalAlpha = (1 - progress) * 0.45;
+    ctx.beginPath();
+    ctx.arc(x, y, PULSE_DOT_RADIUS + PULSE_REACH * progress, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = 1;
+    ctx.beginPath();
+    ctx.arc(x, y, PULSE_DOT_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+}
+
+/**
+ * Nudges axis badges apart so none is buried under another.
+ *
+ * Two labels at nearly the same price — a last value and an alert a few ticks
+ * away — paint over each other, and the one underneath becomes a fringe of
+ * pixels around the one on top. Neither is then readable, which is worse than
+ * either being a pixel out of place.
+ *
+ * Solved as a settle rather than a sort: a pass down the list pushes each
+ * badge clear of the one above it, then a pass back up rescues anything that
+ * was pushed off the bottom. Two passes are enough because the first leaves
+ * the list ordered and evenly spaced, so the second only ever has to slide a
+ * run of them upward together.
+ *
+ * Positions are changed; nothing is dropped. A caller who put a label at a
+ * price is owed the label.
+ *
+ * @param {{y: number}[]} badges
+ * @param {number} height of one badge
+ * @param {number} top of the pane
+ * @param {number} bottom
+ * @return {{y: number}[]} the same badges, ordered and spread
+ */
+export function spreadBadges(badges, height, top, bottom) {
+    const ordered = [...badges].sort((a, b) => a.y - b.y);
+
+    let lowest = top - height;
+
+    for (const badge of ordered) {
+        badge.y = Math.max(badge.y, lowest + height);
+        lowest = badge.y;
+    }
+
+    let highest = bottom + height;
+
+    for (let index = ordered.length - 1; index >= 0; index--) {
+        ordered[index].y = Math.min(ordered[index].y, highest - height);
+        highest = ordered[index].y;
+    }
+
+    return ordered;
+}
+
+/**
+ * Moves one entry to a new position in a list, in place.
+ *
+ * Clamped rather than refused: a caller asking to put a series on top should
+ * not have to count how many there are first, and an index past the end plainly
+ * means the end.
+ *
+ * @param {Array} list
+ * @param {*} item
+ * @param {number} order
+ * @return {Array} the same list
+ */
+export function moveInOrder(list, item, order) {
+    const from = list.indexOf(item);
+
+    if (from < 0) {
+        return list;
+    }
+
+    list.splice(from, 1);
+    list.splice(Math.max(0, Math.min(list.length, Math.round(order))), 0, item);
+
+    return list;
+}
+
+/**
+ * The reading a price line and its badge should follow.
+ *
+ * `LastBar` is the newest bar in the data, on screen or not. `LastVisible` is
+ * the newest one actually in view, so scrolling back through history takes the
+ * line with you instead of leaving it pinned to a price that scrolled off the
+ * right edge — where it still reads as the current price, and is not.
+ *
+ * @param {Object} series
+ * @param {number} visibleTo last index in view
+ * @return {Object|null}
+ */
+export function sourcePoint(series, visibleTo) {
+    if (series.options.priceLineSource !== PriceLineSource.LastVisible) {
+        return series.lastPoint();
+    }
+
+    for (let index = Math.min(visibleTo, series.byIndex.length - 1); index >= 0; index--) {
+        const point = series.byIndex[index];
+
+        if (point && point.value !== null && point.value !== undefined) {
+            return point;
+        }
+    }
+
+    return null;
+}
+
+/** Painting order, so a hit on a higher layer beats one underneath it. */
+const Z_ORDER_RANK = { bottom: 0, normal: 1, top: 2 };
+
+/** A hit on an explicit point, which outranks a line or a region. */
+const POINT_HIT = 2;
+
+/**
+ * Whether `candidate` should win over `winner`.
+ *
+ * The layer decides first — something drawn on top is what the pointer is
+ * over. Within a layer a point beats anything else however far away it is,
+ * because a handle is a thing you aim at and a region is a thing you are
+ * merely inside; a drawing's endpoints must stay grabbable when they sit on
+ * top of its own fill. Only then does distance decide, and ties keep the order
+ * the primitives were attached in.
+ *
+ * @param {Object} candidate
+ * @param {Object} winner
+ * @return {boolean}
+ */
+function hitBeats(candidate, winner) {
+    const layer = (hit) => Z_ORDER_RANK[hit.zOrder] ?? Z_ORDER_RANK.normal;
+
+    if (layer(candidate) !== layer(winner)) {
+        return layer(candidate) > layer(winner);
+    }
+
+    const isPoint = (hit) => hit.hitTestPriority === POINT_HIT;
+
+    if (isPoint(candidate) !== isPoint(winner)) {
+        return isPoint(candidate);
+    }
+
+    return (candidate.distance ?? 0) < (winner.distance ?? 0);
+}
+
+/**
+ * What a primitive claims sits under the pointer, or null.
+ *
+ * Every primitive is asked and the best answer wins rather than the first, so
+ * two drawings that overlap resolve the way they look rather than the way they
+ * were attached.
+ *
+ * Takes the best hit so far and returns the better of the two, so a caller can
+ * walk pane after pane without building a list of candidates on every pointer
+ * move — which, on a chart with no primitives at all, is the difference
+ * between allocating nothing and allocating on every mouse event.
+ *
+ * @param {Object[]} primitives
+ * @param {number} x CSS px within the chart
+ * @param {number} y
+ * @param {Object|null} winner best hit found so far
+ * @return {Object|null}
+ */
+export function hitTestPrimitives(primitives, x, y, winner = null) {
+    for (const primitive of primitives) {
+        let hit;
+
+        try {
+            hit = primitive.hitTest?.(x, y);
+        } catch {
+            // A primitive that throws while hit testing simply is not hit.
+            continue;
+        }
+
+        if (hit && (winner === null || hitBeats(hit, winner))) {
+            winner = hit;
+        }
+    }
+
+    return winner;
+}
+
 class Series {
     constructor(chart, pane, definition, options) {
         this.chart = chart;
@@ -280,6 +699,11 @@ class Series {
         this.markers = [];
         this.priceLines = [];
         this.primitives = [];
+
+        // Told when this series' data changes, which is not the same as the
+        // chart redrawing: a subscriber loading history wants to know a bar
+        // arrived, not that a pointer moved.
+        this.dataHandlers = new Set();
         this.api = this.createApi();
     }
 
@@ -424,6 +848,128 @@ class Series {
 
                 return series.scale.priceScale.yToPrice(y);
             },
+
+            /**
+             * How much of this series lies inside a logical range, and how much
+             * is left on either side.
+             *
+             * The counts either side are the whole point: they are how a chart
+             * that loads history on demand knows the reader has run out of bars
+             * to the left and it is time to fetch more.
+             */
+            barsInLogicalRange: (range) => {
+                if (! range || ! series.points.length) {
+                    return null;
+                }
+
+                // This series' own ends, not the chart's. On a chart carrying
+                // a short series beside a long one — a moving average that
+                // starts late, a second instrument with less history — the
+                // merged index would report bars before the range that belong
+                // to somebody else's data, and a caller loading history on
+                // demand would decide it had plenty when it had none.
+                const first = series.byIndex.findIndex(Boolean);
+                const last = series.byIndex.length - 1 - [...series.byIndex].reverse().findIndex(Boolean);
+
+                if (first < 0) {
+                    return null;
+                }
+
+                const from = Math.max(first, Math.ceil(range.from));
+                const to = Math.min(last, Math.floor(range.to));
+
+                if (from > to) {
+                    return null;
+                }
+
+                let counted = 0;
+
+                for (let index = from; index <= to; index++) {
+                    if (series.byIndex[index]) {
+                        counted++;
+                    }
+                }
+
+                return {
+                    barsBefore: range.from - first,
+                    barsAfter: last - range.to,
+                    from: series.byIndex[from]?.time,
+                    to: series.byIndex[to]?.time,
+                    length: counted,
+                };
+            },
+
+            /**
+             * The reading at a logical index.
+             *
+             * `seekDirection` decides what happens when that index holds
+             * nothing — whitespace, or a bar this series simply does not have
+             * because another series on the chart is denser.
+             */
+            dataByIndex: (index, seekDirection) => {
+                const at = Math.round(index);
+                const found = series.byIndex[at];
+
+                if (found) {
+                    return found.raw;
+                }
+
+                const step = seekDirection === -1 ? -1 : (seekDirection === 1 ? 1 : 0);
+
+                if (step === 0) {
+                    return null;
+                }
+
+                for (let cursor = at + step; cursor >= 0 && cursor < series.byIndex.length; cursor += step) {
+                    if (series.byIndex[cursor]) {
+                        return series.byIndex[cursor].raw;
+                    }
+                }
+
+                return null;
+            },
+
+            /** The formatter the axis uses, so a caller can print the same string. */
+            priceFormatter: () => ({
+                format: (price) => series.chart.formatPrice(price, series.scale, series),
+            }),
+
+            subscribeDataChanged: (handler) => series.dataHandlers.add(handler),
+            unsubscribeDataChanged: (handler) => series.dataHandlers.delete(handler),
+
+            /**
+             * Drops the last reading.
+             *
+             * The partner to `update` on a streaming chart: a provisional bar
+             * arrives, is drawn, and is then withdrawn rather than corrected —
+             * which `setData` can only express by resending the whole history.
+             */
+            pop: () => {
+                if (! series.points.length) {
+                    return null;
+                }
+
+                const removed = series.points.pop();
+
+                series.chart.dataChanged();
+
+                return removed.raw;
+            },
+
+            /** Where this series sits in its pane's painting order. */
+            seriesOrder: () => series.pane.series.indexOf(series),
+
+            /**
+             * Moves it in that order. Later is nearer the reader.
+             *
+             * Clamped rather than refused: a caller asking for the top does not
+             * want to first count how many series there are.
+             */
+            setSeriesOrder: (order) => {
+                moveInOrder(series.pane.series, series, order);
+                series.chart.scheduleRender();
+            },
+
             _internal: series,
         };
     }
@@ -470,6 +1016,12 @@ class Series {
         const point = normalisePoint(item, timestamp);
         const last = this.points[this.points.length - 1];
 
+        // Stamped on every update, whether or not anything is animating: the
+        // option can be turned on between one tick and the next, and a pulse
+        // that only started working after the *second* tick would look broken
+        // rather than off.
+        this.pulseStartedAt = this.chart.now();
+
         if (last && last.ts === timestamp) {
             this.points[this.points.length - 1] = point;
 
@@ -509,12 +1061,32 @@ export class Chart {
         this.container = container;
         this.options = mergeOptions(
             chartDefaults(),
+            // Tracking is in both builds. It is how a price is read on a
+            // phone, and the phone is where most of these charts are read —
+            // compiling it out of the light build to save a few dozen bytes
+            // saved them in the place they were least affordable.
+            { trackingMode: { exitMode: 'onTouchEnd' } },
+        );
+        mergeOptions(
+            this.options,
             FULL_BUILD
                 ? {
                     layout: { panes: paneDefaults() },
                     leftPriceScale: leftScaleDefaults(),
-                    trackingMode: { exitMode: 'onTouchEnd' },
                     kineticScroll: { touch: true, mouse: false },
+                    timeScale: {
+                        // Merge readings that would land in the same pixel
+                        // column when zoomed out. Off by default, matching
+                        // them: most charts hold hundreds of points, where
+                        // this is all cost and no benefit.
+                        enableConflation: false,
+
+                        // How much smoothing. One merges only what cannot be
+                        // told apart; higher merges more, which suits a
+                        // sparkline where the shape matters more than the
+                        // readings.
+                        conflationThresholdFactor: 1,
+                    },
                 }
                 : {},
         );
@@ -525,6 +1097,16 @@ export class Chart {
         this.plot = { left: 0, top: 0, right: 0, bottom: 0 };
         this.crosshairHandlers = new Set();
         this.clickHandlers = new Set();
+        this.dblClickHandlers = new Set();
+
+        // Told when the chart's own box changes, which a caller sizing a
+        // toolbar beside it cannot learn any other way.
+        this.sizeHandlers = new Set();
+
+        // What a primitive claims is under the pointer, recomputed on every
+        // move. Kept on the chart rather than passed around because both the
+        // cursor and the event payload need the same answer from one test.
+        this.hovered = null;
         this.logicalRangeHandlers = new Set();
         this.timeRangeHandlers = new Set();
         this.lastLogicalRange = null;
@@ -547,7 +1129,14 @@ export class Chart {
             pinchDistance: 0,
             lastTouchAt: 0,
             touchSpeed: 0,
+
+            // Set once a finger has held still long enough to mean it, and
+            // cleared when it lifts. While it is set the chart does not scroll.
+            tracking: false,
+            touch: null,
         };
+
+        this.longPress = createLongPress(() => this.beginTracking());
 
         this.buildDom();
         this.applySize(this.options.width, this.options.height);
@@ -558,7 +1147,23 @@ export class Chart {
     buildDom() {
         this.element = document.createElement('div');
         this.element.className = 'arincen-chart-root';
-        this.element.style.cssText = 'position:relative;overflow:hidden;';
+
+        // A long press on the chart is ours: it is how a reader without a
+        // mouse gets a crosshair. The browser thinks a long press means select
+        // this, or offer to copy and search it, and puts its own bubble over
+        // the chart while the crosshair is being placed underneath.
+        //
+        // `user-select` stops the selection, and the WebKit callout is a
+        // separate refusal on iOS — without both, the phone answers the
+        // gesture first and the chart looks broken while working perfectly.
+        this.element.style.cssText = [
+            'position:relative',
+            'overflow:hidden',
+            'user-select:none',
+            '-webkit-user-select:none',
+            '-webkit-touch-callout:none',
+            '',
+        ].join(';');
 
         this.mainCanvas = document.createElement('canvas');
         this.mainCanvas.style.cssText = 'position:absolute;inset:0;display:block;';
@@ -570,8 +1175,8 @@ export class Chart {
         this.element.appendChild(this.overlayCanvas);
         this.container.appendChild(this.element);
 
-        this.mainCtx = this.mainCanvas.getContext('2d');
-        this.overlayCtx = this.overlayCanvas.getContext('2d');
+        this.mainCtx = this.contextOf(this.mainCanvas);
+        this.overlayCtx = this.contextOf(this.overlayCanvas);
         this.updateAttribution();
     }
 
@@ -591,6 +1196,8 @@ export class Chart {
 
     applySize(width, height) {
         const rect = this.container.getBoundingClientRect();
+        const previousWidth = this.width;
+        const previousHeight = this.height;
 
         this.width = Math.max(0, Math.floor(width || rect.width || this.container.clientWidth));
         this.height = Math.max(0, Math.floor(height || rect.height || this.container.clientHeight));
@@ -605,8 +1212,33 @@ export class Chart {
             canvas.height = Math.floor(this.height * ratio);
             canvas.style.width = `${this.width}px`;
             canvas.style.height = `${this.height}px`;
-            canvas.getContext('2d').setTransform(ratio, 0, 0, ratio, 0, 0);
+            this.contextOf(canvas).setTransform(ratio, 0, 0, ratio, 0, 0);
         }
+
+        // Announced only on a real change. A resize observer fires on every
+        // layout pass, and a subscriber that rebuilt a toolbar each time would
+        // be doing it for nothing on most of them.
+        if (this.width !== previousWidth || this.height !== previousHeight) {
+            for (const handler of this.sizeHandlers) {
+                handler({ width: this.width, height: this.height });
+            }
+        }
+    }
+
+    /**
+     * The drawing context, in the colour space the chart was asked for.
+     *
+     * Requested once per canvas and then reused: a context's colour space is
+     * fixed when it is first taken, so asking again with a different one
+     * quietly returns the first. A browser that does not know the option
+     * ignores it and returns an ordinary sRGB context, which is the answer we
+     * want anyway.
+     *
+     * @param {HTMLCanvasElement} canvas
+     * @return {CanvasRenderingContext2D}
+     */
+    contextOf(canvas) {
+        return canvas.getContext('2d', { colorSpace: this.options.layout.colorSpace || 'srgb' });
     }
 
     startAutoSize() {
@@ -614,10 +1246,12 @@ export class Chart {
             return;
         }
 
-        this.resizeObserver = new ResizeObserver(() => {
-            this.applySize(0, 0);
-            this.scheduleRender();
-        });
+        // Through `resize` rather than straight to `applySize`, so an
+        // auto-sizing chart honours the range lock too. Most charts that want
+        // the lock are auto-sizing — it is a reflowing layout that provokes
+        // the need — so wiring it only into the manual path would have served
+        // the case that barely arises.
+        this.resizeObserver = new ResizeObserver(() => this.resize(0, 0));
 
         this.resizeObserver.observe(this.container);
     }
@@ -657,7 +1291,22 @@ export class Chart {
             const index = pane.series.findIndex((series) => series.api === seriesApi);
 
             if (index >= 0) {
-                pane.series.splice(index, 1);
+                const [removed] = pane.series.splice(index, 1);
+
+                // A custom series is somebody else's object, and it may be
+                // holding a cache, an offscreen canvas or a worker. We told it
+                // when it arrived; it is owed the other half of that.
+                try {
+                    removed.definition.paneView?.destroy?.();
+                } catch {
+                    // Its own clean-up failing is not a reason to leave the
+                    // chart half-holding a series it has already dropped.
+                }
+
+                for (const primitive of [...removed.primitives]) {
+                    removed.detachPrimitive(primitive);
+                }
+
                 this.dataChanged();
 
                 return;
@@ -707,8 +1356,61 @@ export class Chart {
             }
         }
 
+        // Built once here rather than merged per frame: merging on every
+        // frame would walk every point on every frame, which is the cost this
+        // exists to avoid.
+        //
+        // Cleared when the option is off, not merely left unbuilt. A ladder
+        // that outlived the option it was built for meant a caller could turn
+        // conflation off and go on getting it, silently — and the ladder is
+        // the largest thing a series holds, so it is also a leak.
+        if (FULL_BUILD) {
+            const wanted = this.options.timeScale.enableConflation;
+
+            for (const series of all) {
+                series.conflation = wanted
+                    ? buildConflationLevels(series.byIndex, series.definition.isBarLike)
+                    : null;
+            }
+        }
+
         this.timeScale.setPoints(this.timeIndex);
-        this.timeScale.padBars = all.some((series) => series.definition.isBarLike) ? 0.5 : 0;
+        // How much room the outermost reading needs so the edge does not slice
+        // it: half a bar for a candle, half a stroke for a line. Both decided
+        // in one pass over the series rather than two.
+        let bars = 0;
+        let pixels = 0;
+
+        for (const series of all) {
+            if (series.definition.isBarLike) {
+                bars = 0.5;
+
+                continue;
+            }
+
+            const width = series.options.lineWidth ?? 0;
+
+            pixels = Math.max(pixels, width / 2);
+
+            // Point markers are a full-build option, so the light build has no
+            // reason to carry the branch that measures them.
+            if (FULL_BUILD && series.options.pointMarkersVisible) {
+                pixels = Math.max(pixels, series.options.pointMarkersRadius ?? Math.max(2, width + 1));
+            }
+        }
+
+        this.timeScale.padBars = bars;
+        this.timeScale.padPixels = pixels;
+
+        // Told after the index is rebuilt, not before: a subscriber's first
+        // instinct is to ask where the new bar landed, and answering from a
+        // half-updated scale is worse than not answering.
+        for (const series of all) {
+            for (const handler of series.dataHandlers) {
+                handler();
+            }
+        }
+
         this.scheduleRender();
     }
 
@@ -809,7 +1511,15 @@ export class Chart {
                 continue;
             }
 
-            const range = seriesPriceRange(series, from, to);
+            // Primitives widen the series' own range before the provider is
+            // consulted, so a caller who overrides autoscaling entirely still
+            // gets the last word — which is what overriding it means.
+            const range = widenForPrimitives(
+                series.primitives,
+                seriesPriceRange(series, from, to),
+                from,
+                to,
+            );
 
             if (! range) {
                 continue;
@@ -859,9 +1569,17 @@ export class Chart {
             if (base) {
                 // The axis is a move, not a price, so a caller's price
                 // formatter — currency symbols and all — would be wrong here.
-                return scale.options.mode === PriceScaleMode.Percentage
-                    ? `${((price / base - 1) * 100).toFixed(2)}%`
-                    : ((price / base) * 100).toFixed(2);
+                // There is a separate one for exactly this, because how many
+                // decimals a move deserves is a different question from how
+                // many a price does.
+                const percent = (price / base - 1) * 100;
+                const custom = this.options.localization.percentageFormatter?.(percent);
+
+                if (scale.options.mode === PriceScaleMode.Percentage) {
+                    return custom ?? `${percent.toFixed(2)}%`;
+                }
+
+                return ((price / base) * 100).toFixed(2);
             }
         }
 
@@ -953,6 +1671,7 @@ export class Chart {
         });
 
         this.drawTimeAxis(ctx, timeTicks);
+        this.drawAxisPrimitives(ctx);
         this.emitVisibleRange();
 
         if (FULL_BUILD && this.panes.length > 1) {
@@ -960,6 +1679,50 @@ export class Chart {
         }
 
         this.drawCrosshair();
+    }
+
+    /**
+     * Lets primitives draw inside the axis strips themselves.
+     *
+     * Separate from the pane views because the axes are not the plot: a
+     * renderer given the whole canvas would have to know where the axis starts
+     * and be trusted not to paint over the chart. Here it is handed a target
+     * sized to the strip and clipped to it, so its coordinates start at the
+     * strip's own corner and it cannot escape.
+     *
+     * @param {CanvasRenderingContext2D} ctx
+     */
+    drawAxisPrimitives(ctx) {
+        for (const strip of axisStrips(this.plot, this.width, this.height)) {
+            if (! strip.width || ! strip.height) {
+                continue;
+            }
+
+            // Clipped in absolute coordinates before the origin is applied: a
+            // clip is stored in device space once set, so it stays where it
+            // was put however the transform changes afterwards.
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(strip.left, strip.top, strip.width, strip.height);
+            ctx.clip();
+
+            const target = createRenderTarget(
+                ctx,
+                { width: strip.width, height: strip.height },
+                window.devicePixelRatio || 1,
+                { x: strip.left, y: strip.top },
+            );
+
+            for (const pane of this.panes) {
+                drawPrimitives(pane.primitives, 'normal', target, strip.views);
+
+                for (const series of pane.series) {
+                    drawPrimitives(series.primitives, 'normal', target, strip.views);
+                }
+            }
+
+            ctx.restore();
+        }
     }
 
     /**
@@ -1076,13 +1839,21 @@ export class Chart {
             drawPrimitives(pane.primitives, 'bottom', target);
         }
 
+        if (FULL_BUILD) {
+            this.drawBaseLine(ctx, pane);
+        }
+
         for (const series of pane.series) {
             if (! series.options.visible) {
                 continue;
             }
 
+            const view = FULL_BUILD ? this.conflatedView(series) : null;
+
             const context = {
                 series,
+                conflated: view?.points ?? null,
+                step: view?.step ?? 1,
                 options: series.options,
                 priceScale: series.scale.priceScale,
                 timeScale: this.timeScale,
@@ -1109,6 +1880,11 @@ export class Chart {
             }
 
             this.drawCustomPriceLines(ctx, pane, series);
+
+            if (FULL_BUILD) {
+                this.drawLastPricePulse(ctx, series);
+            }
+
             drawPrimitives(series.primitives, 'top', target);
         }
 
@@ -1118,6 +1894,115 @@ export class Chart {
         }
 
         ctx.restore();
+    }
+
+    /**
+     * A ring breathing outward from the newest point.
+     *
+     * The one thing a still picture of a chart cannot say is whether it is
+     * still live. A price that stopped updating an hour ago looks exactly like
+     * one arriving now, and on a page carrying a streaming quote that is the
+     * difference between a number you can trade on and one you cannot.
+     *
+     * `OnDataUpdate` pulses once per change and then rests, for a series that
+     * updates in bursts; `Continuous` never rests, for one that should always
+     * look live.
+     *
+     * @param {CanvasRenderingContext2D} ctx
+     * @param {Series} series
+     */
+    drawLastPricePulse(ctx, series) {
+        const mode = series.options.lastPriceAnimation;
+
+        if (! mode || ! series.definition.lastValueColor) {
+            return;
+        }
+
+        const point = series.lastPoint();
+
+        if (! point || point.value === null || point.value === undefined) {
+            return;
+        }
+
+        const progress = mode === LastPriceAnimationMode.Continuous
+            ? continuousPhase(this.now())
+            : pulsePhase(series.pulseStartedAt, this.now());
+
+        if (progress === null) {
+            return;
+        }
+
+        const index = series.byIndex.lastIndexOf(point);
+
+        if (index < 0) {
+            return;
+        }
+
+        drawPulse(
+            ctx,
+            this.timeScale.indexToX(index),
+            series.scale.priceScale.priceToY(point.value),
+            progress,
+            series.definition.lastValueColor(series.options, point),
+        );
+
+        // The next frame is the animation. Asked for only while a pulse is
+        // actually running, so a chart whose animation is off — which is the
+        // default — never schedules a frame it does not need.
+        this.scheduleRender();
+    }
+
+    /** Overridable in tests; the chart never reads the clock anywhere else. */
+    now() {
+        return performance.now();
+    }
+
+    /**
+     * The zero line of a rebased axis.
+     *
+     * On a percentage or indexed scale every value is a move away from a
+     * starting point, and without that starting point drawn, "up four per
+     * cent" and "down four per cent" are the same picture until you stop and
+     * read the axis. Drawn under the series, because it is a reference and not
+     * a reading.
+     *
+     * @param {CanvasRenderingContext2D} ctx
+     * @param {Object} pane
+     */
+    drawBaseLine(ctx, pane) {
+        for (const scale of paneScales(pane)) {
+            const mode = scale.options.mode;
+            const rebased = mode === PriceScaleMode.Percentage || mode === PriceScaleMode.IndexedTo100;
+            const series = scale.series?.find((candidate) => candidate.options.visible);
+
+            if (! rebased || ! series || ! series.options.baseLineVisible) {
+                continue;
+            }
+
+            const base = scale.priceScale.percentageBase;
+
+            if (! Number.isFinite(base)) {
+                continue;
+            }
+
+            const y = Math.round(scale.priceScale.priceToY(base)) + 0.5;
+
+            if (y < pane.plot.top || y > pane.plot.bottom) {
+                continue;
+            }
+
+            const { baseLineColor, baseLineWidth, baseLineStyle } = series.options;
+
+            ctx.save();
+            ctx.strokeStyle = baseLineColor;
+            ctx.lineWidth = baseLineWidth;
+            applyLineStyle(ctx, baseLineStyle, baseLineWidth);
+            ctx.beginPath();
+            ctx.moveTo(pane.plot.left, y);
+            ctx.lineTo(pane.plot.right, y);
+            ctx.stroke();
+            ctx.restore();
+        }
     }
 
     /**
@@ -1165,8 +2050,44 @@ export class Chart {
         }
     }
 
+    /**
+     * The reading the price line and the last-value badge should follow.
+     *
+     * `LastBar` is the newest bar in the data, on screen or not. `LastVisible`
+     * is the newest one actually in view, so scrolling back through history
+     * takes the line with you instead of leaving it pinned to a price that
+     * scrolled off the right edge — where it reads as the current price and is
+     * not.
+     *
+     * @param {Series} series
+     * @return {Object|null}
+     */
+    priceSourcePoint(series) {
+        return FULL_BUILD
+            ? sourcePoint(series, this.timeScale.visibleIndices().to)
+            : series.lastPoint();
+    }
+
+    /**
+     * The coarsest view of a series that still draws every distinguishable
+     * reading, or null to draw the data as it stands.
+     *
+     * @param {Series} series
+     * @return {{step: number, points: Object[]}|null}
+     */
+    conflatedView(series) {
+        if (! series.conflation) {
+            return null;
+        }
+
+        const factor = series.options.conflationThresholdFactor
+            ?? this.options.timeScale.conflationThresholdFactor;
+
+        return levelFor(series.conflation, conflationStep(this.timeScale.barSpacing, factor));
+    }
+
     drawPriceLine(ctx, pane, series) {
-        const point = series.lastPoint();
+        const point = this.priceSourcePoint(series);
 
         if (! point) {
             return;
@@ -1199,8 +2120,11 @@ export class Chart {
         }
 
         const { borderVisible, borderColor } = record.options;
-        const badges = this.collectAxisBadges(pane, record);
         const badgeHeight = this.options.layout.fontSize + 6;
+        const collected = this.collectAxisBadges(pane, record);
+        const badges = FULL_BUILD && record.options.alignLabels
+            ? spreadBadges(collected, badgeHeight, pane.plot.top, pane.plot.bottom)
+            : collected;
         const edge = onLeft ? this.plot.left : this.plot.right;
 
         ctx.save();
@@ -1236,6 +2160,12 @@ export class Chart {
                 onLeft ? edge - LABEL_PADDING_X : edge + LABEL_PADDING_X,
                 tick.y,
             );
+
+            // A short mark joining the label to the axis line, for readers who
+            // want to see which gridline a number belongs to on a busy scale.
+            if (record.options.ticksVisible) {
+                ctx.fillRect(onLeft ? edge - TICK_MARK : edge, Math.round(tick.y), TICK_MARK, 1);
+            }
         }
 
         if (borderVisible) {
@@ -1248,11 +2178,27 @@ export class Chart {
         }
 
         for (const badge of badges) {
+            // A corner label the pane cannot hold whole is dropped rather than
+            // clipped: half a price reads as a whole one, and a number that is
+            // quietly wrong is worse than a number that is missing.
+            if (FULL_BUILD && record.options.entireTextOnly
+                && (badge.y - badgeHeight / 2 < pane.plot.top || badge.y + badgeHeight / 2 > pane.plot.bottom)) {
+                continue;
+            }
+
             if (badge.title) {
                 this.drawSeriesTitleTag(ctx, pane, badge.title, badge.y, badge.background);
             }
 
             this.drawAxisBadge(ctx, pane, badge.text, badge.y, badge.background, badge.textColor, onLeft);
+
+            // A short mark joining the badge to the axis line, for a plugin
+            // that wants its label tied to a level rather than floating beside
+            // one. Only ever drawn for a view that asked for it.
+            if (badge.tick) {
+                ctx.fillStyle = badge.background;
+                ctx.fillRect(onLeft ? edge - TICK_MARK : edge, Math.round(badge.y), TICK_MARK, 1);
+            }
         }
 
         ctx.restore();
@@ -1304,7 +2250,7 @@ export class Chart {
                 continue;
             }
 
-            const point = series.lastPoint();
+            const point = this.priceSourcePoint(series);
 
             if (! point) {
                 continue;
@@ -1317,6 +2263,21 @@ export class Chart {
                 textColor: undefined,
                 title: series.options.title,
             });
+        }
+
+        // A primitive's own labels last, so they paint over the series values.
+        // A plugin that draws a level and cannot label the axis has told the
+        // reader where the level is but not what it is worth, which is the
+        // half of the answer they came for.
+        for (const series of drawn) {
+            collectPrimitiveBadges(series.primitives, record, pane, badges);
+        }
+
+        // Only against the pane's own scale. A pane-level primitive belongs to
+        // no series and so to no particular scale, and adding it to every
+        // record would print its label twice on a chart with a left axis.
+        if (record === pane) {
+            collectPrimitiveBadges(pane.primitives, record, pane, badges);
         }
 
         return badges;
@@ -1393,29 +2354,60 @@ export class Chart {
 
         ctx.font = this.font();
 
+        // One candidate per pixel at most.
+        //
+        // This walked every visible bar, which is fine at a thousand and
+        // ruinous at half a million: each one costs two Date objects to weigh
+        // and a text measurement to size, so a chart of minute bars over a
+        // decade spent tens of milliseconds a frame deciding where to put
+        // forty labels. No two candidates a pixel apart can both be drawn, so
+        // examining them was work that could never change the answer.
+        const stride = Math.max(1, Math.round(1 / Math.max(this.timeScale.barSpacing, 1e-6)));
+
         // A series that never crosses midnight — the intraday tab — has no
         // tick above hour weight to offer. Dropping those would leave the axis
         // blank, so the time-of-day labels stand in.
-        const weights = [];
+        const weights = new Map();
+        let previous = from > 0 ? this.timeIndex[from - stride] ?? this.timeIndex[from - 1] : null;
 
-        for (let index = from; index <= to; index++) {
-            weights.push(tickWeight(this.timeIndex[index], index > 0 ? this.timeIndex[index - 1] : null));
+        for (let index = from; index <= to; index += stride) {
+            // Weighed against the previous *sampled* bar rather than the
+            // previous bar: at this zoom a boundary inside one stride cannot be
+            // drawn separately anyway, so what matters is the coarsest
+            // boundary the stride crossed.
+            weights.set(index, tickWeight(this.timeIndex[index], previous));
+            previous = this.timeIndex[index];
         }
 
-        const hasDayBoundary = weights.some((weight, position) => (
-            weight >= TickWeight.Day && position > 0
-        ));
+        let hasDayBoundary = false;
+
+        for (const [index, weight] of weights) {
+            if (weight >= TickWeight.Day && index > from) {
+                hasDayBoundary = true;
+
+                break;
+            }
+        }
+
         const skipIntraday = ! allowIntraday && hasDayBoundary;
 
-        for (let index = from; index <= to; index++) {
+        for (let index = from; index <= to; index += stride) {
             const timestamp = this.timeIndex[index];
-            const weight = weights[index - from];
+            const weight = weights.get(index);
 
             if (skipIntraday && weight < TickWeight.Day) {
                 continue;
             }
 
-            const label = formatTick(timestamp, weight, { locale, spanSeconds });
+            // A caller's formatter is asked first and may decline by returning
+            // nothing, which is how "just the year, but leave the rest alone"
+            // is expressed without reimplementing the whole ladder.
+            const custom = this.options.timeScale.tickMarkFormatter?.(timestamp, weight, locale);
+            const label = custom ?? formatTick(timestamp, weight, {
+                locale,
+                spanSeconds,
+                dateFormat: this.options.localization.dateFormat,
+            });
 
             perClassCount.set(weight, (perClassCount.get(weight) ?? 0) + 1);
 
@@ -1483,9 +2475,18 @@ export class Chart {
         // minutes.
         const leadWeight = ticks.reduce((highest, tick) => Math.max(highest, tick.weight), 0);
 
+        // The coarsest boundary on screen carries the weight, unless a caller
+        // would rather it did not — a dense axis, or a typeface whose bold is
+        // heavy enough to read as a different size.
+        const bold = this.options.timeScale.allowBoldLabels !== false;
+
         for (const tick of ticks) {
-            ctx.font = tick.weight === leadWeight ? `bold ${this.font()}` : this.font();
+            ctx.font = bold && tick.weight === leadWeight ? `bold ${this.font()}` : this.font();
             ctx.fillText(tick.label, tick.x, this.plot.bottom + 6);
+
+            if (this.options.timeScale.ticksVisible) {
+                ctx.fillRect(Math.round(tick.x), this.plot.bottom, 1, TICK_MARK);
+            }
         }
 
         ctx.font = this.font();
@@ -1499,7 +2500,50 @@ export class Chart {
             ctx.stroke();
         }
 
+        this.drawPrimitiveTimeLabels(ctx);
+
         ctx.restore();
+    }
+
+    /**
+     * Labels a primitive wants on the time axis — the date a drawing starts
+     * at, the moment an event fired.
+     *
+     * Painted over the tick labels, for the same reason the price axis paints
+     * its badges over its ticks: a label half-covering a date is worse than
+     * either of them alone.
+     *
+     * @param {CanvasRenderingContext2D} ctx
+     */
+    drawPrimitiveTimeLabels(ctx) {
+        const labels = [];
+
+        for (const pane of this.panes) {
+            collectTimeAxisLabels(pane.primitives, labels);
+
+            for (const series of pane.series) {
+                collectTimeAxisLabels(series.primitives, labels);
+            }
+        }
+
+        if (! labels.length) {
+            return;
+        }
+
+        const height = this.options.layout.fontSize + 8;
+
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        for (const label of labels) {
+            const width = ctx.measureText(label.text).width + AXIS_PADDING;
+            const left = Math.max(0, Math.min(this.plot.right - width, label.x - width / 2));
+
+            ctx.fillStyle = label.background;
+            ctx.fillRect(left, this.plot.bottom + 1, width, height);
+            ctx.fillStyle = label.textColor || contrastTextColor(label.background);
+            ctx.fillText(label.text, left + width / 2, this.plot.bottom + 1 + height / 2);
+        }
     }
 
     /* ------------------------------------------------------------ crosshair */
@@ -1749,6 +2793,7 @@ export class Chart {
 
         const point = this.localPoint(event);
 
+        this.hovered = this.primitiveAt(point);
         this.applyCursor(point);
         this.trackSeparatorHover(point);
         this.updateCrosshair(point, event);
@@ -1774,6 +2819,27 @@ export class Chart {
         }
     }
 
+    /**
+     * What a primitive claims sits under the pointer, across every pane and
+     * every series.
+     *
+     * @param {{x: number, y: number}} point
+     * @return {Object|null}
+     */
+    primitiveAt(point) {
+        let winner = null;
+
+        for (const pane of this.panes) {
+            winner = hitTestPrimitives(pane.primitives, point.x, point.y, winner);
+
+            for (const series of pane.series) {
+                winner = hitTestPrimitives(series.primitives, point.x, point.y, winner);
+            }
+        }
+
+        return winner;
+    }
+
     applyCursor(point) {
         const region = this.pointer.mode ?? this.regionAt(point);
 
@@ -1795,7 +2861,11 @@ export class Chart {
             return;
         }
 
-        this.element.style.cursor = '';
+        // A drawing that can be grabbed has to say so under the pointer, or it
+        // is not discoverable that it can be grabbed at all. Asked after the
+        // chart's own regions so a primitive lying over an axis cannot take
+        // the cursor away from a drag that is already the axis's job.
+        this.element.style.cursor = this.hovered?.cursorStyle ?? '';
     }
 
     /**
@@ -1924,6 +2994,30 @@ export class Chart {
         const point = this.localPoint(event);
         const region = this.regionAt(point);
 
+        if (region === 'plot' && this.dblClickHandlers.size) {
+            const index = this.indexAt(point.x);
+            const item = this.allSeries.map((series) => series.byIndex[index]).find(Boolean);
+            const hit = this.primitiveAt(point);
+
+            for (const handler of this.dblClickHandlers) {
+                handler({
+                    time: item ? item.time : undefined,
+                    logical: index,
+                    point,
+                    hoveredObjectId: hit?.externalId,
+                    sourceEvent: event,
+                });
+            }
+        }
+
+        // A double click on an axis puts it back to automatic. Refusable,
+        // because on a chart whose scale a caller drives themselves, having it
+        // silently taken back by a stray double click is a bug they cannot see
+        // the cause of.
+        if (! this.axisResetEnabled()) {
+            return;
+        }
+
         if (region === 'price') {
             const record = this.scaleAtX(this.paneAt(point.y), point.x);
 
@@ -1938,6 +3032,20 @@ export class Chart {
             this.autoFit = true;
             this.scheduleRender();
         }
+    }
+
+    /**
+     * `handleScale.axisDoubleClickReset` is either a flag for both axes or an
+     * object naming them, the same shape `axisPressedMouseMove` takes.
+     *
+     * @return {boolean}
+     */
+    axisResetEnabled() {
+        const option = this.options.handleScale.axisDoubleClickReset;
+
+        return typeof option === 'object' && option !== null
+            ? option.price !== false || option.time !== false
+            : option !== false;
     }
 
     updateCrosshair(point, event) {
@@ -1955,12 +3063,62 @@ export class Chart {
         }
 
         const pane = this.paneAt(point.y);
-        const snapped = magnetPrice(pane, index, point.y, this.options.crosshair.mode);
+        const snapped = magnetPrice(
+            pane,
+            index,
+            point.y,
+            this.options.crosshair.mode,
+            this.options.crosshair.doNotSnapToHiddenSeriesIndices,
+        );
         const y = snapped === null ? point.y : pane.priceScale.priceToY(snapped);
 
         this.crosshair = { index, y, x: point.x, pane };
         this.drawCrosshair();
         this.emitCrosshair(index, point, event);
+    }
+
+    /**
+     * Places the crosshair from a price and a time rather than from a pointer.
+     *
+     * The price is read through the given series' own scale, not the pane's
+     * first one: on a chart with an overlay on a second scale, taking the
+     * pane's would put the crosshair at the right number on the wrong axis.
+     *
+     * @param {number} price
+     * @param {*} horizontalPosition a time
+     * @param {Object} seriesApi
+     */
+    setCrosshair(price, horizontalPosition, seriesApi) {
+        const timestamp = toTimestamp(horizontalPosition);
+
+        if (timestamp === null || ! this.timeIndex.length || ! Number.isFinite(price)) {
+            return;
+        }
+
+        this.ensureLayout();
+
+        const index = nearestIndex(this.timeIndex, timestamp);
+        const series = seriesApi?._internal;
+        const scale = series?.scale ?? this.panes[0];
+        const pane = series?.pane ?? this.panes[0];
+
+        this.crosshair = {
+            index,
+            y: scale.priceScale.priceToY(price),
+            x: this.timeScale.indexToX(index),
+            pane,
+        };
+
+        this.drawCrosshair();
+    }
+
+    clearCrosshair() {
+        if (! this.crosshair) {
+            return;
+        }
+
+        this.crosshair = null;
+        this.drawCrosshair();
     }
 
     handlePointerLeave() {
@@ -1969,6 +3127,7 @@ export class Chart {
         }
 
         this.crosshair = null;
+        this.hovered = null;
         this.drawCrosshair();
 
         for (const handler of this.crosshairHandlers) {
@@ -2001,6 +3160,13 @@ export class Chart {
             point: { x: point.x, y: point.y },
             seriesData,
             hoveredSeries,
+
+            // The id the primitive gave for whatever is under the pointer.
+            // Without it a subscriber knows a click happened somewhere on the
+            // chart but not which of its own drawings it landed on, which is
+            // the difference between a chart you can annotate and one you can
+            // only look at.
+            hoveredObjectId: this.hovered?.externalId,
             sourceEvent: event,
         };
 
@@ -2050,8 +3216,20 @@ export class Chart {
             const index = this.indexAt(point.x);
             const item = this.allSeries.map((series) => series.byIndex[index]).find(Boolean);
 
+            // Tested here rather than reused from the hover: a tap on a touch
+            // screen produces no move beforehand, so there is nothing hovered
+            // to reuse and a drawing would only ever be selectable with a
+            // mouse.
+            const hit = this.primitiveAt(point);
+
             for (const handler of this.clickHandlers) {
-                handler({ time: item ? item.time : undefined, logical: index, point, sourceEvent: event });
+                handler({
+                    time: item ? item.time : undefined,
+                    logical: index,
+                    point,
+                    hoveredObjectId: hit?.externalId,
+                    sourceEvent: event,
+                });
             }
         }
 
@@ -2079,7 +3257,16 @@ export class Chart {
 
             event.preventDefault();
             this.autoFit = false;
-            this.timeScale.zoomAt(this.localPoint(event).x, 1 + step / 10);
+
+            // Anchored at the pointer by default, which is what makes a wheel
+            // zoom feel like leaning in: the bar you are looking at stays under
+            // the cursor. Anchoring at the right edge instead keeps the newest
+            // bar in place, which is what a live chart wants — you are watching
+            // the edge, not the middle.
+            this.timeScale.zoomAt(
+                this.options.timeScale.rightBarStaysOnScroll ? this.plot.right : this.localPoint(event).x,
+                1 + step / 10,
+            );
             this.scheduleRender();
 
             return;
@@ -2098,13 +3285,22 @@ export class Chart {
         }
 
         if (event.touches.length === 1) {
-            this.pointer.lastX = event.touches[0].clientX;
+            const touch = event.touches[0];
+
+            this.pointer.lastX = touch.clientX;
             this.pointer.pinchDistance = 0;
             this.pointer.touchSpeed = 0;
-            this.trackTouch(event.touches[0]);
+            this.pointer.touch = { clientX: touch.clientX, clientY: touch.clientY };
+
+            if (this.options.trackingMode) {
+                this.longPress.start({ x: touch.clientX, y: touch.clientY });
+            }
 
             return;
         }
+
+        // A second finger is a pinch, which is not a hold and not a reading.
+        this.endTracking();
 
         if (event.touches.length === 2) {
             this.pointer.pinchDistance = Math.hypot(
@@ -2139,9 +3335,22 @@ export class Chart {
         }
 
         if (event.touches.length === 1) {
-            const x = event.touches[0].clientX;
+            const touch = event.touches[0];
+            const x = touch.clientX;
 
-            this.trackTouch(event.touches[0]);
+            this.pointer.touch = { clientX: touch.clientX, clientY: touch.clientY };
+
+            // Once the finger is tracking it belongs to the crosshair, and the
+            // chart holds still underneath it. Scrolling as well would mean
+            // the bar being read slides out from under the reading.
+            if (this.pointer.tracking) {
+                event.preventDefault();
+                this.trackTouch(touch);
+
+                return;
+            }
+
+            this.longPress.move({ x: touch.clientX, y: touch.clientY });
 
             if (handleScroll.horzTouchDrag) {
                 const delta = x - this.pointer.lastX;
@@ -2155,25 +3364,53 @@ export class Chart {
     }
 
     /**
+     * Enters tracking, once the finger has proved it is holding rather than
+     * scrolling. Anything the flick was going to do is abandoned.
+     */
+    beginTracking() {
+        this.pointer.tracking = true;
+        this.pointer.touchSpeed = 0;
+
+        if (this.pointer.touch) {
+            this.trackTouch(this.pointer.touch);
+        }
+    }
+
+    endTracking() {
+        this.longPress.cancel();
+
+        if (! this.pointer.tracking) {
+            return;
+        }
+
+        this.pointer.tracking = false;
+
+        if (this.options.trackingMode?.exitMode === 'onTouchEnd') {
+            this.handlePointerLeave();
+        }
+    }
+
+    /**
      * Shows the crosshair for a touch, above the finger rather than under it.
      *
      * @param {Touch} touch
      */
     trackTouch(touch) {
-        if (FULL_BUILD && this.options.trackingMode) {
-            this.updateCrosshair(trackingPoint(touch, this.element.getBoundingClientRect()));
-        }
+        this.updateCrosshair(trackingPoint(touch, this.element.getBoundingClientRect()));
     }
 
     handleTouchEnd() {
         this.pointer.pinchDistance = 0;
 
-        if (FULL_BUILD) {
-            if (this.options.trackingMode?.exitMode === 'onTouchEnd') {
-                this.handlePointerLeave();
-            }
+        const wasTracking = this.pointer.tracking;
 
-            if (this.options.kineticScroll?.touch && Math.abs(this.pointer.touchSpeed) > 1) {
+        this.endTracking();
+
+        if (FULL_BUILD) {
+            // A flick that ended in a reading is not a flick. Carrying the
+            // chart on after the finger lifts would slide the bar out from
+            // under the price the reader just stopped to look at.
+            if (! wasTracking && this.options.kineticScroll?.touch && Math.abs(this.pointer.touchSpeed) > 1) {
                 this.cancelKinetic = startKineticScroll(this, this.pointer.touchSpeed);
             }
         }
@@ -2223,6 +3460,129 @@ export class Chart {
                 this.autoFit = true;
                 this.scheduleRender();
             },
+
+            /**
+             * Puts a span of logical indices on screen.
+             *
+             * Every viewport method funnels through here, and each one turns
+             * off auto-fitting first: a caller naming a range and then having
+             * the chart refit itself on the next frame would be watching the
+             * chart argue with them.
+             */
+            setVisibleLogicalRange: (range) => {
+                if (! range) {
+                    return;
+                }
+
+                this.ensureLayout();
+                this.autoFit = false;
+                this.timeScale.setLogicalRange(range.from, range.to);
+                this.scheduleRender();
+            },
+
+            /**
+             * The same, named in times rather than indices.
+             *
+             * A time that falls on no bar takes the nearest one, because the
+             * scale is indexed by bar: a Saturday is not a position on this
+             * axis, and refusing the call would make every weekend a special
+             * case for the caller instead of for us.
+             */
+            setVisibleRange: (range) => {
+                if (! range || ! this.timeIndex.length) {
+                    return;
+                }
+
+                const from = toTimestamp(range.from);
+                const to = toTimestamp(range.to);
+
+                if (from === null || to === null) {
+                    return;
+                }
+
+                this.ensureLayout();
+                this.autoFit = false;
+                this.timeScale.setLogicalRange(
+                    nearestIndex(this.timeIndex, from),
+                    nearestIndex(this.timeIndex, to),
+                );
+                this.scheduleRender();
+            },
+
+            /** Bars of whitespace between the last bar and the right edge. */
+            scrollPosition: () => {
+                this.ensureLayout();
+
+                return this.timeScale.rightOffset;
+            },
+
+            scrollToPosition: (position, animated) => {
+                this.ensureLayout();
+                this.autoFit = false;
+                this.timeScale.rightOffset = position;
+                this.timeScale.clampToEdges();
+                this.scheduleRender();
+
+                // `animated` is accepted and ignored, deliberately: a caller
+                // porting code should not have to delete an argument, and a
+                // jump is a truthful answer to a request to be somewhere.
+                void animated;
+            },
+
+            /**
+             * Back to the framing the chart was configured with.
+             *
+             * The configured one, not a fit: `barSpacing` and `rightOffset` as
+             * the caller set them, or the defaults if they set nothing. That is
+             * a different answer from `fitContent`, which squeezes every bar on
+             * screen however many there are — and on a chart with ten years of
+             * daily data those two look nothing alike. Doing a fit here would
+             * make this method a second name for that one.
+             */
+            resetTimeScale: () => {
+                this.ensureLayout();
+                this.autoFit = false;
+                this.timeScale.setBarSpacing(this.options.timeScale.barSpacing);
+                this.timeScale.rightOffset = this.options.timeScale.rightOffset;
+                this.timeScale.clampToEdges();
+                this.scheduleRender();
+            },
+
+            coordinateToLogical: (x) => {
+                this.ensureLayout();
+
+                return this.timeIndex.length ? this.timeScale.xToIndex(x) : null;
+            },
+
+            logicalToCoordinate: (logical) => {
+                this.ensureLayout();
+
+                return this.timeIndex.length ? this.timeScale.indexToX(logical) : null;
+            },
+
+            /**
+             * The index a time sits at, or null.
+             *
+             * `findNearest` is the difference between "where is this bar" and
+             * "where would this moment go", and a caller placing a drawing at
+             * an arbitrary timestamp wants the second.
+             */
+            timeToIndex: (time, findNearest) => {
+                const timestamp = toTimestamp(time);
+
+                if (timestamp === null || ! this.timeIndex.length) {
+                    return null;
+                }
+
+                const index = nearestIndex(this.timeIndex, timestamp);
+
+                return findNearest || this.timeIndex[index] === timestamp ? index : null;
+            },
+
+            height: () => Math.max(0, this.height - this.plot.bottom),
+
+            subscribeSizeChange: (handler) => this.sizeHandlers.add(handler),
+            unsubscribeSizeChange: (handler) => this.sizeHandlers.delete(handler),
             applyOptions: (options) => {
                 mergeOptions(this.options.timeScale, options ?? {});
                 this.timeScale.options = this.options.timeScale;
@@ -2250,7 +3610,14 @@ export class Chart {
             },
             options: () => this.options.timeScale,
             scrollToRealTime: () => {
-                this.timeScale.rightOffset = this.timeScale.padBars;
+                this.ensureLayout();
+
+                const spacing = this.timeScale.barSpacing;
+
+                this.timeScale.rightOffset = spacing > 0
+                    ? this.timeScale.edgePadding() / spacing
+                    : this.timeScale.padBars;
+
                 this.scheduleRender();
             },
             getVisibleRange: () => {
@@ -2295,8 +3662,27 @@ export class Chart {
         };
     }
 
+    /**
+     * A narrower chart shows fewer bars by default: the bars keep their width
+     * and the viewport loses some off the left.
+     *
+     * `lockVisibleTimeRangeOnResize` reverses that — the same span of time
+     * stays on screen and the bars get thinner to fit. A dashboard reflowing
+     * its panels wants the second: a chart that silently changed which month
+     * it was showing because a sidebar opened is a chart that lied.
+     */
     resize(width, height) {
+        const framing = this.options.timeScale.lockVisibleTimeRangeOnResize
+            ? this.timeScale.logicalRange()
+            : null;
+
         this.applySize(width, height);
+
+        if (framing) {
+            this.ensureLayout();
+            this.timeScale.setLogicalRange(framing.from, framing.to);
+        }
+
         this.scheduleRender();
     }
 
@@ -2318,6 +3704,24 @@ export class Chart {
 
     remove() {
         this.removed = true;
+
+        // Removing the chart removes its series, and each of those is owed the
+        // same clean-up it would get from `removeSeries`. A page that swaps
+        // charts on a route change would otherwise leak whatever every custom
+        // series and every primitive was holding.
+        for (const pane of this.panes) {
+            for (const series of pane.series) {
+                try {
+                    series.definition.paneView?.destroy?.();
+                } catch {
+                    // Their clean-up, their problem; ours continues.
+                }
+
+                for (const primitive of [...series.primitives]) {
+                    series.detachPrimitive(primitive);
+                }
+            }
+        }
 
         if (FULL_BUILD) {
             this.cancelKinetic?.();
@@ -2347,6 +3751,8 @@ export class Chart {
         this.panes = [];
         this.crosshairHandlers.clear();
         this.clickHandlers.clear();
+        this.dblClickHandlers.clear();
+        this.sizeHandlers.clear();
         this.logicalRangeHandlers.clear();
         this.timeRangeHandlers.clear();
     }

@@ -1,9 +1,19 @@
-# Primitives
+# What a plugin is
 
-A primitive draws on a chart that already knows how to draw itself: bands,
-alert lines, annotations, anything that sits over or under the data.
+Two extension points, and the difference between them is what you are
+replacing.
 
-It is a plain object. There is no class to extend and nothing to register.
+| | you are | full build only |
+|---|---|---|
+| **Primitive** | drawing *over* a chart that already works | no |
+| **Custom series** | replacing how a series draws entirely | yes |
+
+A primitive is the one you want almost every time: bands, alert lines, session
+shading, a trend line the reader can drag, a label on an axis. A custom series
+is for when none of the seven built-in shapes is the shape — a heatmap, a
+footprint chart, box plots.
+
+Both are plain objects. There is no class to extend and nothing to register.
 
 ```js
 const band = {
@@ -27,7 +37,46 @@ const band = {
 series.attachPrimitive(band);
 ```
 
-`series.detachPrimitive(band)` removes it again.
+`series.detachPrimitive(band)` removes it again — and here it is, running:
+
+<ChartDemo :height="280">
+
+```js
+const series = chart.addSeries(LineSeries, { color: '#db2777', lineWidth: 2 });
+const values = data.map((bar) => ({ time: bar.time, value: bar.value }));
+
+series.setData(values);
+chart.timeScale().fitContent();
+
+const middle = values.reduce((total, point) => total + point.value, 0) / values.length;
+
+const band = {
+    updateAllViews: () => {},
+    paneViews: () => [{
+        zOrder: () => 'bottom',
+        renderer: () => ({
+            draw(target) {
+                target.useMediaCoordinateSpace(({ context, mediaSize }) => {
+                    const top = series.priceToCoordinate(middle + 4);
+                    const bottom = series.priceToCoordinate(middle - 4);
+
+                    if (top === null || bottom === null) {
+                        return;
+                    }
+
+                    context.fillStyle = 'rgba(192, 38, 211, 0.14)';
+                    context.fillRect(0, top, mediaSize.width, bottom - top);
+                });
+            },
+        }),
+    }],
+};
+
+series.attachPrimitive(band);
+onCleanup(() => series.detachPrimitive(band));
+```
+
+</ChartDemo>
 
 ## The lifecycle
 
@@ -92,9 +141,18 @@ Third-party drawing code should not be able to blank the chart it is drawn on.
 This makes bugs quieter, so check the console rather than assuming a primitive
 that draws nothing is being ignored.
 
+## Where to go next
+
+- [Your first primitive](/plugins/first-primitive) — a complete one, built up
+- [Drawing on the axes](/plugins/axes) — labels on the price and time scales
+- [Hit testing and dragging](/plugins/hit-testing) — making it interactive
+- [Custom series](/plugins/custom-series) — replacing the drawing entirely
+- [Seven things that will catch you](/plugins/traps) — read this before
+  debugging anything
+
 ## Compatibility
 
 The object shape is the one lightweight-charts uses for series primitives, so
 drawing code written against that library generally runs here unmodified. That
 is a deliberate convenience, not a compatibility promise — see
-[Coming from lightweight-charts](/guide/migrating).
+[Coming from lightweight-charts](/start/migrating).

@@ -62,14 +62,34 @@ test('an invisible series offers no candidates', () => {
     assert.equal(magnetPrice(pane, 0, 500 - 190, CrosshairMode.Magnet), 100);
 });
 
+/**
+ * A bar exactly as the engine stores one. The fixtures here used to carry a
+ * `value` alongside the four prices, which no series ever produces, and that
+ * single invented field hid the defect below for the whole life of the file.
+ */
+const candle = (open, high, low, close) => [{ ts: 1, open, high, low, close }];
+
+/**
+ * The defect: the plain magnet looked only for `value`, which is how a line
+ * stores its price. A candlestick stores `close`, so on the default crosshair
+ * mode candlesticks did not snap at all — and because the failure was "nothing
+ * happens" rather than "the wrong thing happens", it read as the magnet being
+ * subtle rather than absent.
+ */
+test('a candlestick snaps in the default magnet mode', () => {
+    const pane = paneWith(candle(90, 140, 80, 105));
+
+    assert.equal(magnetPrice(pane, 0, 500 - 104, CrosshairMode.Magnet), 105);
+});
+
 test('magnet ignores open, high and low', () => {
-    const pane = paneWith([{ value: 100, open: 90, high: 140, low: 80, close: 100 }]);
+    const pane = paneWith(candle(90, 140, 80, 100));
 
     assert.equal(magnetPrice(pane, 0, 500 - 138, CrosshairMode.Magnet), 100);
 });
 
 test('magnet OHLC snaps to whichever of the four prices is nearest', () => {
-    const bar = [{ value: 100, open: 90, high: 140, low: 80, close: 100 }];
+    const bar = candle(90, 140, 80, 100);
 
     assert.equal(magnetPrice(paneWith(bar), 0, 500 - 138, CrosshairMode.MagnetOHLC), 140);
     assert.equal(magnetPrice(paneWith(bar), 0, 500 - 82, CrosshairMode.MagnetOHLC), 80);

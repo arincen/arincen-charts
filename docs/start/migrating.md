@@ -9,7 +9,42 @@ worth making.
 
 ## What is the same
 
-Most of the everyday API:
+Most of the everyday API. The chart below is drawn by a snippet written
+against lightweight-charts — series definition, options, price line, crosshair
+subscription — running here with only the import changed.
+
+<ChartDemo :height="300">
+
+```js
+const series = chart.addSeries(CandlestickSeries, {
+    upColor: '#22ab94',
+    downColor: '#f23645',
+    borderUpColor: '#22ab94',
+    borderDownColor: '#f23645',
+    wickUpColor: '#22ab94',
+    wickDownColor: '#f23645',
+});
+
+series.setData(data.slice(-70));
+
+series.createPriceLine({
+    price: data[data.length - 1].close,
+    color: '#db2777',
+    lineWidth: 1,
+    lineStyle: LineStyle.Dashed,
+    axisLabelVisible: true,
+    title: 'last',
+});
+
+chart.subscribeCrosshairMove(() => {});
+chart.timeScale().fitContent();
+```
+
+</ChartDemo>
+
+The v5 `addSeries(Definition, options, paneIndex)` form, price lines,
+`update`, crosshair subscriptions and the time scale all take the shapes you
+already pass them:
 
 ```js
 const chart = createChart(container, options);
@@ -23,9 +58,8 @@ chart.timeScale().fitContent();
 chart.subscribeCrosshairMove(handler);
 ```
 
-The v5 `addSeries(Definition, options, paneIndex)` form, series primitives,
-custom series, panes, price scales and the crosshair modes all take the same
-shapes.
+Series primitives, custom series, panes, price scales and the crosshair modes
+are the same shapes too.
 
 ## What is different
 
@@ -50,22 +84,32 @@ Honestly, so you find out here rather than mid-migration:
 
 | | |
 |---|---|
-| `@arincen/charts` | ~14 KB gzipped |
-| `@arincen/charts/full` | ~17 KB gzipped |
-| lightweight-charts v5 | ~35 KB gzipped |
+| `@arincen/charts` | ~18 KB gzipped |
+| `@arincen/charts/full` | ~23 KB gzipped |
+| lightweight-charts v5.2 | ~60 KB gzipped |
 
-Measured the same way, on the standalone builds, both checked by a size budget
-that fails the build.
+All three measured the same way — gzip level 9 over the standalone build each
+project ships. The last row is measured rather than quoted: their README says
+about thirty-five kilobytes, which was true of version 4.
 
-## Should you move
+A test measures ours on every run and fails if any number written in these
+docs is not what the bundle actually is.
 
-**Probably not, if** lightweight-charts is working for you and its size is not
-a problem. It is a mature library with a large user base and features we do not
-have.
+## Moving across
 
-**Worth trying, if** you ship a chart on a page where 35 KB is a real cost, you
-have many pages with simple charts, or you want the structural features
-compiled out rather than shipped and unused.
+The import is usually the only line that changes:
+
+```diff
+- import { createChart, AreaSeries } from 'lightweight-charts';
++ import { createChart, AreaSeries } from '@arincen/charts';
+```
+
+Series definitions, `setData`, price lines, primitives, panes and the crosshair
+all take the shapes you already pass them. Reach for `@arincen/charts/full`
+when you need panes, custom series or a non-linear scale.
+
+Everything on this page is measured, so you can check the claims before you
+commit to anything.
 
 ---
 

@@ -19,9 +19,18 @@ export {
     BarSeries,
     HistogramSeries,
     LineStyle,
+    LineType,
+    PriceLineSource,
     CrosshairMode,
     PriceScaleMode,
 } from './index.js';
 
+// Straight from the options module, not through the light entry: the light
+// build cannot act on a last-price animation and so does not export the enum
+// naming its modes, and re-exporting it from there would only be re-exporting
+// something that is not there.
+export { LastPriceAnimationMode } from './options.js';
+
 export { FULL_BUILD } from './flags.js';
-export { createTextWatermark } from './watermark.js';
+export { createTextWatermark, createImageWatermark } from './watermark.js';
+export { createUpDownMarkers } from './up-down-markers.js';

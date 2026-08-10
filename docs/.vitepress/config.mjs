@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitepress';
+import { fileURLToPath } from 'node:url';
 
 /**
  * The docs site, served from docs.arincen.com/charts.
@@ -8,9 +9,34 @@ import { defineConfig } from 'vitepress';
  * from the first day. Putting it at the root and moving it later would break
  * links in other people's writing, which is the one kind of link you cannot go
  * back and fix.
+ *
+ * Sizes are written as "about eighteen kilobytes" in prose and never as a
+ * precise figure. The precise figure belongs on the landing page, which reads
+ * it from the shipped file at request time; a number typed into a markdown file
+ * is a number that starts drifting the day after it is typed, and the first
+ * version of these docs drifted four kilobytes before anyone noticed.
  */
 export default defineConfig({
     base: '/charts/',
+
+    // The examples on these pages run against the engine's own source, not a
+    // published copy of it. A documentation site that demonstrates last
+    // release's behaviour is a documentation site that lies slowly.
+    vite: {
+        resolve: {
+            alias: {
+                '@arincen/charts/full': fileURLToPath(
+                    new URL('../../src/full.js', import.meta.url),
+                ),
+                '@arincen/charts': fileURLToPath(
+                    new URL('../../src/index.js', import.meta.url),
+                ),
+            },
+        },
+        define: {
+            __ARINCEN_CHARTS_FULL__: 'true',
+        },
+    },
 
     // Built into a `charts` folder rather than the root of dist. Cloudflare
     // Pages serves the output directory at the domain root, so a base path
@@ -20,47 +46,97 @@ export default defineConfig({
     outDir: '.vitepress/dist/charts',
     lang: 'en-US',
     title: 'Arincen Charts',
-    description: 'A financial chart in about 14 KB, with zero dependencies.',
+    description: 'A financial chart in about 18 KB, with zero dependencies.',
     cleanUrls: true,
     lastUpdated: true,
 
+    // The site's own favicon files, copied rather than redrawn. A second mark
+    // that merely resembles the first is how a brand ends up with two.
     head: [
-        ['link', { rel: 'icon', href: '/charts/favicon.svg' }],
-        ['meta', { name: 'theme-color', content: '#2962ff' }],
+        ['link', { rel: 'icon', type: 'image/png', sizes: '96x96', href: '/charts/favicon/favicon-96x96.png' }],
+        ['link', { rel: 'icon', type: 'image/svg+xml', href: '/charts/favicon/favicon.svg' }],
+        ['link', { rel: 'shortcut icon', href: '/charts/favicon/favicon.ico' }],
+        ['link', { rel: 'apple-touch-icon', sizes: '180x180', href: '/charts/favicon/apple-touch-icon.png' }],
+        ['meta', { name: 'theme-color', content: '#000000' }],
     ],
 
     themeConfig: {
-        siteTitle: 'Arincen Charts',
+        // The wordmark already says "arincen", so the title beside it is the
+        // half of the name the logo does not carry. Spelling it out twice is
+        // how a nav bar ends up reading "arincen Arincen Charts".
+        logo: { light: '/logo-dark.svg', dark: '/logo-light.svg', alt: 'Arincen' },
+        siteTitle: 'Charts',
 
         nav: [
-            { text: 'Guide', link: '/guide/', activeMatch: '/guide/' },
+            { text: 'Start', link: '/start/', activeMatch: '/start/' },
+            { text: 'Guides', link: '/guide/series', activeMatch: '/guide/' },
+            { text: 'Frameworks', link: '/frameworks/react', activeMatch: '/frameworks/' },
+            { text: 'Plugins', link: '/plugins/', activeMatch: '/plugins/' },
+            { text: 'Recipes', link: '/recipes/', activeMatch: '/recipes/' },
             { text: 'API', link: '/api/', activeMatch: '/api/' },
-            { text: 'Overview', link: 'https://en.arincen.com/charts' },
         ],
 
         sidebar: [
             {
-                text: 'Guide',
+                text: 'Start',
                 items: [
-                    { text: 'Getting started', link: '/guide/' },
-                    { text: 'Two builds', link: '/guide/two-builds' },
-                    { text: 'Series', link: '/guide/series' },
-                    { text: 'Price scales', link: '/guide/price-scales' },
-                    { text: 'Panes', link: '/guide/panes' },
+                    { text: 'Install', link: '/start/' },
+                    { text: 'Your first chart', link: '/start/first-chart' },
+                    { text: 'Choosing a series', link: '/start/choosing-a-series' },
+                    { text: 'Live data', link: '/start/live-data' },
+                    { text: 'Coming from lightweight-charts', link: '/start/migrating' },
                 ],
             },
             {
-                text: 'Extending',
+                text: 'Guides',
                 items: [
-                    { text: 'Primitives', link: '/guide/primitives' },
-                    { text: 'Custom series', link: '/guide/custom-series' },
+                    { text: 'Series', link: '/guide/series' },
+                    { text: 'Price scales', link: '/guide/price-scales' },
+                    { text: 'The time scale', link: '/guide/time-scale' },
+                    { text: 'Crosshair and interaction', link: '/guide/interaction' },
+                    { text: 'Markers and price lines', link: '/guide/markers' },
+                    { text: 'Panes', link: '/guide/panes' },
+                    { text: 'Watermarks and up/down markers', link: '/guide/watermarks' },
+                    { text: 'Localization and typography', link: '/guide/localization' },
+                    { text: 'The two builds', link: '/guide/two-builds' },
+                    { text: 'Large datasets', link: '/guide/performance' },
+                ],
+            },
+            {
+                text: 'Frameworks',
+                items: [
+                    { text: 'React', link: '/frameworks/react' },
+                    { text: 'Vue', link: '/frameworks/vue' },
+                    { text: 'No build step', link: '/frameworks/script-tag' },
+                ],
+            },
+            {
+                text: 'Plugins',
+                items: [
+                    { text: 'What a plugin is', link: '/plugins/' },
+                    { text: 'Your first primitive', link: '/plugins/first-primitive' },
+                    { text: 'Drawing on the axes', link: '/plugins/axes' },
+                    { text: 'Hit testing and dragging', link: '/plugins/hit-testing' },
+                    { text: 'Custom series', link: '/plugins/custom-series' },
+                    { text: 'Seven things that will catch you', link: '/plugins/traps' },
+                ],
+            },
+            {
+                text: 'Recipes',
+                items: [
+                    { text: 'Overview', link: '/recipes/' },
+                    { text: 'Synchronised charts', link: '/recipes/synced-charts' },
+                    { text: 'Load history on scroll', link: '/recipes/infinite-history' },
+                    { text: 'A live streaming chart', link: '/recipes/streaming' },
+                    { text: 'A sparkline', link: '/recipes/sparkline' },
                 ],
             },
             {
                 text: 'Reference',
                 items: [
                     { text: 'API', link: '/api/' },
-                    { text: 'Coming from lightweight-charts', link: '/guide/migrating' },
+                    { text: 'Chart options', link: '/api/chart-options' },
+                    { text: 'Series options', link: '/api/series-options' },
                     { text: 'Attribution and licence', link: '/attribution' },
                 ],
             },
@@ -78,9 +154,16 @@ export default defineConfig({
             text: 'Suggest a change to this page',
         },
 
+        // The trademark notice is not here.
+        //
+        // It is required, and it is carried in the three places it belongs:
+        // the package's NOTICE file, /attribution, and the migration page —
+        // every page that names TradingView, plus the file a licence audit
+        // reads. In the global footer it also appeared on the twenty-five
+        // pages that never mention them, which met no obligation and printed a
+        // competitor's brand on every page of our own documentation.
         footer: {
-            message: 'Released under the MIT licence. Lightweight Charts™ is a trademark of TradingView, Inc. '
-                + 'This project is not affiliated with or endorsed by TradingView.',
+            message: 'Released under the MIT licence.',
             copyright: 'Copyright © 2026 Arincen L.L.C-FZ',
         },
     },

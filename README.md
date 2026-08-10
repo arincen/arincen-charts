@@ -2,9 +2,9 @@
 
 [Documentation](https://docs.arincen.com/charts) · [Overview](https://en.arincen.com/charts)
 
-A financial chart that draws itself on a canvas, in about **13 KB gzipped**, with **zero dependencies**.
+A financial chart that draws itself on a canvas, in about **18 KB gzipped**, with **zero dependencies**.
 
-Both numbers are checked by the build rather than claimed: the bundle fails if it grows past its budget, and there is nothing in `dependencies` to audit.
+Both numbers are checked rather than claimed: a test gzips the shipped bundle and fails if it has grown past its budget or if the figure written here is not the one it measured, and there is nothing in `dependencies` to audit.
 
 ## Two builds from one codebase
 
@@ -14,8 +14,8 @@ So the split is made at build time:
 
 | | size | has |
 |---|---|---|
-| `@arincen/charts` | ~13 KB | line, area, candlestick, bar, histogram, baseline · crosshair · markers · price lines · primitives · pan/zoom |
-| `@arincen/charts/full` | ~17 KB | all of that, plus panes, logarithmic / percentage / indexed price scales, left and overlay scales, custom series, watermarks, touch tracking, kinetic scroll |
+| `@arincen/charts` | ~18 KB | line, area, candlestick, bar, histogram, baseline · crosshair · markers · price lines · primitives · pan/zoom |
+| `@arincen/charts/full` | ~23 KB | all of that, plus panes, logarithmic / percentage / indexed price scales, left and overlay scales, custom series, watermarks, touch tracking, kinetic scroll |
 
 ```js
 import { createChart, AreaSeries } from '@arincen/charts';

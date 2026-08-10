@@ -35,7 +35,12 @@ export function createPane(chart, scaleOptions, stretchFactor = 1) {
 /**
  * The main pane is worth two of any pane added after it, so an oscillator
  * dropped underneath a price chart takes a third of the height rather than
- * half of it. Matches what lightweight-charts gives you unasked.
+ * half of it.
+ *
+ * Two rather than some finer ratio because the price is the subject and the
+ * indicator is the annotation, and a reader given half the chart for an RSI
+ * reads a chart about the RSI. A third is enough to see an oscillator cross
+ * its bands, and it is what a caller who never sets `stretchFactor` gets.
  */
 export const MAIN_PANE_STRETCH = 2;
 
@@ -116,8 +121,24 @@ export const SEPARATOR_HEIGHT = 1;
 /** How far either side of a separator still counts as grabbing it. */
 const SEPARATOR_GRAB = 5;
 
-/** No pane may be dragged smaller than this, in CSS px. */
-const MIN_PANE_HEIGHT = 30;
+/**
+ * A pane stops being a pane below roughly two and a half lines of the chart's
+ * own type — there is nowhere left to put an axis label and a plot.
+ *
+ * Measured in lines rather than fixed in pixels so a chart set in sixteen
+ * point gets a floor to match, which a hard-coded number cannot do. At the
+ * default twelve it works out at the thirty pixels this used to be.
+ */
+const MIN_PANE_LINES = 2.5;
+const FALLBACK_FONT_SIZE = 12;
+
+/**
+ * @param {Object} chart
+ * @return {number} CSS px
+ */
+function minPaneHeight(chart) {
+    return Math.round((chart.options.layout?.fontSize || FALLBACK_FONT_SIZE) * MIN_PANE_LINES);
+}
 
 export function paneDefaults() {
     return {
@@ -228,14 +249,15 @@ export function resizePanes(chart, index, y, snapshot) {
     }
 
     const total = snapshot.upperHeight + snapshot.lowerHeight;
+    const floor = minPaneHeight(chart);
 
-    if (total < MIN_PANE_HEIGHT * 2) {
+    if (total < floor * 2) {
         return;
     }
 
     const upperHeight = Math.max(
-        MIN_PANE_HEIGHT,
-        Math.min(total - MIN_PANE_HEIGHT, snapshot.upperHeight + (y - snapshot.y)),
+        floor,
+        Math.min(total - floor, snapshot.upperHeight + (y - snapshot.y)),
     );
     const share = snapshot.upperStretch + snapshot.lowerStretch;
 

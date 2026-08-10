@@ -20,6 +20,14 @@
 const RTL = /^(ar|he|fa|ur)/i;
 
 /**
+ * Where the mark sends a reader who follows it.
+ *
+ * Exported so the page it names can be asserted to exist. A wordmark on every
+ * chart we draw, pointing at a 404, would be worse than no mark at all.
+ */
+export const ATTRIBUTION_URL = 'https://en.arincen.com/arincen-charts';
+
+/**
  * The mark's inline style, split out from the DOM work so the placement rule
  * can be tested without a browser.
  *
@@ -58,7 +66,7 @@ export function attributionStyle(layout, lang) {
 export function createAttributionMark(container, layout) {
     const link = document.createElement('a');
 
-    link.href = 'https://en.arincen.com/charts';
+    link.href = ATTRIBUTION_URL;
     link.target = '_blank';
     link.rel = 'noopener';
     link.dir = 'ltr';

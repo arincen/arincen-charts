@@ -1,4 +1,5 @@
-import { applyLineStyle, LineStyle } from './options.js';
+import { applyLineStyle, LastPriceAnimationMode, LineStyle, LineType, PriceLineSource } from './options.js';
+import { FULL_BUILD } from './flags.js';
 
 export function commonDefaults() {
     return {
@@ -14,7 +15,52 @@ export function commonDefaults() {
         crosshairMarkerBorderColor: '',
         crosshairMarkerBackgroundColor: '',
         crosshairMarkerBorderWidth: 2,
+        ...structuralDefaults(),
     };
+}
+
+/**
+ * Options only the full build can act on, so only the full build carries them.
+ *
+ * A default is not free: it is a string in the bundle and a key merged on every
+ * series. Shipping the base-line colours to a build whose price scale has no
+ * percentage mode, or an animation mode it never reads, spends the budget on
+ * nothing — and the budget is the product.
+ *
+ * Written as a folded conditional rather than a flagged branch inside
+ * `commonDefaults`, so the whole object literal disappears from the light
+ * build instead of merely going unread.
+ */
+function structuralDefaults() {
+    return FULL_BUILD
+        ? {
+            // Off by default. An animation nobody asked for is a frame
+            // requested forever, and most charts on a page are not live.
+            lastPriceAnimation: LastPriceAnimationMode.Disabled,
+
+            // Which reading the price line and the last-value badge follow.
+            // `LastVisible` keeps them on the bar at the right edge, so
+            // scrolling back through history moves the line with you instead
+            // of leaving it pinned to a price that is off screen.
+            priceLineSource: PriceLineSource.LastBar,
+
+            // Overrides the chart's smoothing for this series alone, so a
+            // sparkline beside a main chart can be smoothed harder.
+            conflationThresholdFactor: undefined,
+
+            // The zero line of a percentage or indexed axis. Meaningless on a
+            // normal one, and not drawn there.
+            baseLineVisible: true,
+            baseLineColor: '#b2b5be',
+            baseLineWidth: 1,
+            baseLineStyle: LineStyle.Solid,
+        }
+        : {};
+}
+
+/** Point markers are a full-build option, for the same reason. */
+function markerDefaults() {
+    return FULL_BUILD ? { pointMarkersVisible: false, pointMarkersRadius: undefined } : {};
 }
 
 function crisp(value, lineWidth) {
@@ -28,10 +74,18 @@ function crisp(value, lineWidth) {
  */
 function eachSegment(context, onSegment) {
     const { series, priceScale, timeScale, from, to } = context;
+
+    // The conflated view, when there is one, is laid out on the same indices
+    // and walked in strides — so this loop is unchanged apart from how far it
+    // steps and which array it reads.
+    const source = context.conflated ?? series.byIndex;
+    const step = context.step ?? 1;
     let segment = [];
 
-    for (let index = from; index <= to; index++) {
-        const point = series.byIndex[index];
+    // Started at the run containing the left edge, not at the edge itself, or
+    // the run straddling it would go undrawn and the line would begin late.
+    for (let index = Math.floor(from / step) * step; index <= to; index += step) {
+        const point = source[index / step];
 
         if (! point || point.value === null || point.value === undefined) {
             if (segment.length) {
@@ -53,7 +107,89 @@ function eachSegment(context, onSegment) {
     }
 }
 
-function strokeLine(ctx, segment, color, width, style) {
+/** How far a curve's control points reach towards their neighbours. */
+const CURVE_TENSION = 0.25;
+
+/**
+ * Lays a segment down as a path, in whichever shape the series asked for.
+ *
+ * Shared by the line, the area and the baseline rather than written three
+ * times: the area's fill and the line drawn on top of it have to follow the
+ * same route, and a stepped area whose outline was diagonal would show a
+ * sliver of fill above its own edge.
+ *
+ * The curve is a Catmull-Rom spline expressed as béziers — control points
+ * pulled a quarter of the way towards each neighbour. It passes through every
+ * point, which a plain bézier through the same points does not, and a chart
+ * whose curve misses its own data would be worse than no curve at all.
+ *
+ * Continues from wherever the path already is, and never issues `moveTo` — the
+ * caller places the pen on the first point. A `moveTo` here would start a new
+ * subpath, orphaning the edge an area has already drawn down to its baseline,
+ * and `closePath` would then cut a diagonal straight across the fill.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {{x: number, y: number}[]} segment
+ * @param {number} lineType
+ */
+export function tracePath(ctx, segment, lineType) {
+    if (lineType === LineType.WithSteps) {
+        for (let i = 1; i < segment.length; i++) {
+            ctx.lineTo(segment[i].x, segment[i - 1].y);
+            ctx.lineTo(segment[i].x, segment[i].y);
+        }
+
+        return;
+    }
+
+    if (lineType === LineType.Curved && segment.length > 2) {
+        for (let i = 0; i < segment.length - 1; i++) {
+            const before = segment[i - 1] ?? segment[i];
+            const from = segment[i];
+            const to = segment[i + 1];
+            const after = segment[i + 2] ?? to;
+
+            ctx.bezierCurveTo(
+                from.x + (to.x - before.x) * CURVE_TENSION,
+                from.y + (to.y - before.y) * CURVE_TENSION,
+                to.x - (after.x - from.x) * CURVE_TENSION,
+                to.y - (after.y - from.y) * CURVE_TENSION,
+                to.x,
+                to.y,
+            );
+        }
+
+        return;
+    }
+
+    for (let i = 1; i < segment.length; i++) {
+        ctx.lineTo(segment[i].x, segment[i].y);
+    }
+}
+
+/**
+ * A dot on each reading.
+ *
+ * On sparse data — quarterly earnings, a dividend history — a bare line makes
+ * ten observations look like a continuous stream. The markers say which points
+ * were measured and which of the line was drawn between them.
+ */
+function drawPointMarkers(ctx, segment, color, radius) {
+    ctx.fillStyle = color;
+
+    for (const point of segment) {
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+/** The radius to use when the caller asked for markers but not for a size. */
+function markerRadius(options) {
+    return options.pointMarkersRadius ?? Math.max(2, options.lineWidth + 1);
+}
+
+function strokeLine(ctx, segment, color, width, style, lineType = LineType.Simple) {
     if (segment.length === 1) {
         ctx.fillStyle = color;
         ctx.beginPath();
@@ -65,10 +201,7 @@ function strokeLine(ctx, segment, color, width, style) {
 
     ctx.beginPath();
     ctx.moveTo(segment[0].x, segment[0].y);
-
-    for (let i = 1; i < segment.length; i++) {
-        ctx.lineTo(segment[i].x, segment[i].y);
-    }
+    tracePath(ctx, segment, lineType);
 
     ctx.strokeStyle = color;
     ctx.lineWidth = width;
@@ -87,13 +220,19 @@ export const LineSeries = {
         color: '#2196f3',
         lineWidth: 3,
         lineStyle: LineStyle.Solid,
+        lineType: LineType.Simple,
+        ...markerDefaults(),
     }),
     lastValueColor: (options) => options.color,
     draw(ctx, context) {
         const { options } = context;
 
         eachSegment(context, (segment) => {
-            strokeLine(ctx, segment, options.color, options.lineWidth, options.lineStyle);
+            strokeLine(ctx, segment, options.color, options.lineWidth, options.lineStyle, options.lineType);
+
+            if (FULL_BUILD && options.pointMarkersVisible) {
+                drawPointMarkers(ctx, segment, options.color, markerRadius(options));
+            }
         });
     },
 };
@@ -108,7 +247,9 @@ export const AreaSeries = {
         lineColor: '#33d778',
         lineWidth: 3,
         lineStyle: LineStyle.Solid,
+        lineType: LineType.Simple,
         invertFilledArea: false,
+        ...markerDefaults(),
     }),
     lastValueColor: (options) => options.lineColor,
     draw(ctx, context) {
@@ -119,19 +260,23 @@ export const AreaSeries = {
         gradient.addColorStop(1, options.invertFilledArea ? options.topColor : options.bottomColor);
 
         eachSegment(context, (segment) => {
+            // The fill follows the same route as the outline: a stepped area
+            // closed with a diagonal would show a sliver of fill above its own
+            // edge, which reads as a rendering fault.
             ctx.beginPath();
             ctx.moveTo(segment[0].x, plot.bottom);
-
-            for (const point of segment) {
-                ctx.lineTo(point.x, point.y);
-            }
-
+            ctx.lineTo(segment[0].x, segment[0].y);
+            tracePath(ctx, segment, options.lineType);
             ctx.lineTo(segment[segment.length - 1].x, plot.bottom);
             ctx.closePath();
             ctx.fillStyle = gradient;
             ctx.fill();
 
-            strokeLine(ctx, segment, options.lineColor, options.lineWidth, options.lineStyle);
+            strokeLine(ctx, segment, options.lineColor, options.lineWidth, options.lineStyle, options.lineType);
+
+            if (FULL_BUILD && options.pointMarkersVisible) {
+                drawPointMarkers(ctx, segment, options.lineColor, markerRadius(options));
+            }
         });
     },
 };
@@ -142,14 +287,16 @@ export const BaselineSeries = {
     defaults: () => ({
         ...commonDefaults(),
         baseValue: { type: 'price', price: 0 },
-        topLineColor: 'rgba(38, 166, 154, 1)',
-        topFillColor1: 'rgba(38, 166, 154, 0.28)',
-        topFillColor2: 'rgba(38, 166, 154, 0.05)',
-        bottomLineColor: 'rgba(239, 83, 80, 1)',
-        bottomFillColor1: 'rgba(239, 83, 80, 0.05)',
-        bottomFillColor2: 'rgba(239, 83, 80, 0.28)',
+        topLineColor: 'rgba(34, 171, 148, 1)',
+        topFillColor1: 'rgba(34, 171, 148, 0.28)',
+        topFillColor2: 'rgba(34, 171, 148, 0.05)',
+        bottomLineColor: 'rgba(242, 54, 69, 1)',
+        bottomFillColor1: 'rgba(242, 54, 69, 0.05)',
+        bottomFillColor2: 'rgba(242, 54, 69, 0.28)',
         lineWidth: 3,
         lineStyle: LineStyle.Solid,
+        lineType: LineType.Simple,
+        ...markerDefaults(),
     }),
     lastValueColor: (options, point) => (
         point && point.value >= (options.baseValue?.price ?? 0)
@@ -184,17 +331,18 @@ export const BaselineSeries = {
             eachSegment(context, (segment) => {
                 ctx.beginPath();
                 ctx.moveTo(segment[0].x, base);
-
-                for (const point of segment) {
-                    ctx.lineTo(point.x, point.y);
-                }
-
+                ctx.lineTo(segment[0].x, segment[0].y);
+                tracePath(ctx, segment, options.lineType);
                 ctx.lineTo(segment[segment.length - 1].x, base);
                 ctx.closePath();
                 ctx.fillStyle = gradient;
                 ctx.fill();
 
-                strokeLine(ctx, segment, lineColor, options.lineWidth, options.lineStyle);
+                strokeLine(ctx, segment, lineColor, options.lineWidth, options.lineStyle, options.lineType);
+
+                if (FULL_BUILD && options.pointMarkersVisible) {
+                    drawPointMarkers(ctx, segment, lineColor, markerRadius(options));
+                }
             });
 
             ctx.restore();
@@ -205,61 +353,87 @@ export const BaselineSeries = {
     },
 };
 
-const SPECIAL_SPACING_FROM = 2.5;
-const SPECIAL_SPACING_TO = 4;
+/**
+ * How much of the space between two bars a candle body fills.
+ *
+ * A flat proportion, not a curve. The alternative is to narrow the fill as
+ * bars spread out, which needs a tuned easing function and produces candles
+ * whose relationship to the space around them keeps changing. Holding it
+ * constant means the rhythm of the chart is the same whether you are looking
+ * at a fortnight or a decade, and the gap is guaranteed rather than emergent.
+ */
+const BODY_FILL = 0.72;
+
+/** Below this, bars are too close together for a gap to survive rounding. */
+const MIN_GAP = 1;
 
 /**
  * Candle body width in *device* pixels.
  *
- * Everything about a candle is solved in device pixels: on a dense daily
- * series the body is only five or six of them wide, so a rounding done in CSS
- * pixels first would swing the result by a third of the candle.
+ * Solved in device pixels and never in CSS pixels: on a dense daily series the
+ * body is five or six device pixels wide, so rounding before the ratio is
+ * applied swings the result by a third of a candle.
+ *
+ * The width is capped so at least one device pixel of background always
+ * separates two candles, until the bars are so tight that a gap would cost the
+ * candle its last pixel — at which point being visible matters more than being
+ * separate.
  *
  * @param {number} barSpacing CSS px between bar centres
  * @param {number} pixelRatio
  * @return {number}
  */
 function barBodyWidth(barSpacing, pixelRatio) {
-    if (barSpacing >= SPECIAL_SPACING_FROM && barSpacing <= SPECIAL_SPACING_TO) {
-        return Math.floor(3 * pixelRatio);
+    const spacing = barSpacing * pixelRatio;
+    const hairline = Math.max(1, Math.floor(pixelRatio));
+    const parity = hairline % 2;
+
+    // Grid lines and the crosshair are a hairline wide, and a body of the
+    // opposite parity sits half a pixel off centre beneath them. Rounded to the
+    // nearest width of the right parity rather than shrunk to reach it — the
+    // obvious way — which quietly costs the candle a pixel it had earned.
+    const filled = Math.round((spacing * BODY_FILL - parity) / 2) * 2 + parity;
+
+    // At least one pixel of background between neighbours, until the bars are
+    // so tight that a gap would cost the candle its last pixel; being visible
+    // matters more then than being separate.
+    const room = Math.floor(spacing) - MIN_GAP;
+    const separated = room >= hairline ? Math.min(filled, room) : hairline;
+
+    return Math.max(hairline, separated, 1);
+}
+
+/**
+ * Outlines a candle body, with the stroke lying *inside* the bounds given.
+ *
+ * Inside, never around: an outline drawn around the body would add two pixels
+ * to every candle's footprint, and at the three-or-so pixels of spacing a year
+ * of daily bars leaves, that is the difference between separated candles and a
+ * solid wall of colour. Canvas centres a stroke on its path, so the path is
+ * inset by half the line width and shrunk by a whole one.
+ *
+ * A body too small to hold an outline and something inside it is filled
+ * instead. A doji is a line; asking for an outline around a line either paints
+ * outside the body or leaves nothing in the middle, and both look like a
+ * rendering fault rather than a candle.
+ *
+ * Every measurement here is device pixels; `scale` returns them to the CSS
+ * pixels the context is drawing in.
+ */
+function outlineBody(ctx, x, y, width, height, border, scale) {
+    if (width <= border * 2 || height <= border * 2) {
+        ctx.fillRect(x * scale, y * scale, width * scale, height * scale);
+
+        return;
     }
 
-    const taper = 1 - 0.2 * Math.atan(Math.max(SPECIAL_SPACING_TO, barSpacing) - SPECIAL_SPACING_TO) / (Math.PI * 0.5);
-    const tapered = Math.floor(barSpacing * taper * pixelRatio);
-    const capped = Math.min(tapered, Math.floor(barSpacing * pixelRatio));
-
-    return Math.max(Math.floor(pixelRatio), capped);
-}
-
-/**
- * How thick the outline around a candle body is, in device pixels.
- *
- * The border is drawn *inside* the body width, never around it. Around it
- * would add two pixels to every candle's footprint, and at the three-or-so
- * pixels of spacing a year of daily bars leaves, that is the difference
- * between separated candles and a solid wall of colour.
- *
- * @param {number} bodyWidth Device px
- * @param {number} pixelRatio
- * @return {number}
- */
-function candleBorderWidth(bodyWidth, pixelRatio) {
-    const hairline = Math.floor(pixelRatio);
-    const fitted = bodyWidth <= 2 * hairline
-        ? Math.max(hairline, Math.floor((bodyWidth - 1) * 0.5))
-        : hairline;
-
-    return bodyWidth <= fitted * 2 ? hairline : fitted;
-}
-
-/**
- * Draws a rectangle outline whose stroke sits inside the given bounds.
- */
-function fillInnerBorder(ctx, x, y, width, height, border, scale) {
-    ctx.fillRect((x + border) * scale, y * scale, (width - border * 2) * scale, border * scale);
-    ctx.fillRect((x + border) * scale, (y + height - border) * scale, (width - border * 2) * scale, border * scale);
-    ctx.fillRect(x * scale, y * scale, border * scale, height * scale);
-    ctx.fillRect((x + width - border) * scale, y * scale, border * scale, height * scale);
+    ctx.lineWidth = border * scale;
+    ctx.strokeRect(
+        (x + border / 2) * scale,
+        (y + border / 2) * scale,
+        (width - border) * scale,
+        (height - border) * scale,
+    );
 }
 
 export const CandlestickSeries = {
@@ -267,33 +441,38 @@ export const CandlestickSeries = {
     isBarLike: true,
     defaults: () => ({
         ...commonDefaults(),
-        upColor: '#26a69a',
-        downColor: '#ef5350',
+        // Arincen's green and red. Deliberately not the palette the library
+        // this API is modelled on ships: an identical default palette is the
+        // first thing anyone comparing the two sees, and it is the one
+        // similarity with no functional or legal reason to exist. Anyone
+        // migrating sets these explicitly anyway.
+        upColor: '#22ab94',
+        downColor: '#f23645',
         borderVisible: true,
-        borderUpColor: '#26a69a',
-        borderDownColor: '#ef5350',
+        borderUpColor: '#22ab94',
+        borderDownColor: '#f23645',
         wickVisible: true,
-        wickUpColor: '#26a69a',
-        wickDownColor: '#ef5350',
+        wickUpColor: '#22ab94',
+        wickDownColor: '#f23645',
     }),
     lastValueColor: (options, point) => (
         point && point.close >= point.open ? options.upColor : options.downColor
     ),
     draw(ctx, context) {
         const { series, options, priceScale, timeScale, pixelRatio, from, to } = context;
+        const source = context.conflated ?? series.byIndex;
+        const step = context.step ?? 1;
         const scale = 1 / pixelRatio;
         const hairline = Math.floor(pixelRatio);
 
-        let bodyWidth = barBodyWidth(timeScale.barSpacing, pixelRatio);
+        // Parity is settled inside the width rule, so nothing is shaved off here.
+        const bodyWidth = barBodyWidth(timeScale.barSpacing, pixelRatio);
 
-        // Grid lines and the crosshair are a hairline wide. Giving the body the
-        // same odd/even parity keeps a candle centred under the crosshair
-        // rather than sitting half a pixel to one side of it.
-        if (bodyWidth >= 2 && (hairline % 2) !== (bodyWidth % 2)) {
-            bodyWidth--;
-        }
-
-        const borderWidth = candleBorderWidth(bodyWidth, pixelRatio);
+        // One hairline, like every other line the chart draws. A border that
+        // thickened with the body would eat a fixed proportion of it, so the
+        // fill colour — the thing that says up or down — would fade out as you
+        // zoomed in, which is exactly backwards.
+        const borderWidth = Math.max(1, hairline);
         const halfBody = Math.floor(bodyWidth * 0.5);
         const solidBorder = timeScale.barSpacing * pixelRatio <= borderWidth * 2;
         const fillsBody = ! options.borderVisible || bodyWidth > borderWidth * 2;
@@ -303,8 +482,8 @@ export const CandlestickSeries = {
         let previousWickEdge = null;
         let previousBodyEdge = null;
 
-        for (let index = from; index <= to; index++) {
-            const point = series.byIndex[index];
+        for (let index = Math.floor(from / step) * step; index <= to; index += step) {
+            const point = source[index / step];
 
             if (! point || point.close === null || point.close === undefined) {
                 continue;
@@ -326,7 +505,7 @@ export const CandlestickSeries = {
                 const low = Math.round(priceScale.priceToY(point.low) * pixelRatio);
                 const width = (right - left + 1) * scale;
 
-                ctx.fillStyle = isUp ? options.wickUpColor : options.wickDownColor;
+                ctx.fillStyle = point.wickColor ?? (isUp ? options.wickUpColor : options.wickDownColor);
                 ctx.fillRect(left * scale, high * scale, width, (top - high) * scale);
                 ctx.fillRect(left * scale, (bottom + 1) * scale, width, (low - bottom) * scale);
 
@@ -339,12 +518,13 @@ export const CandlestickSeries = {
                 : Math.min(Math.max(previousBodyEdge + 1, centre - halfBody), bodyRight);
 
             if (options.borderVisible) {
-                ctx.fillStyle = isUp ? options.borderUpColor : options.borderDownColor;
+                ctx.fillStyle = ctx.strokeStyle = point.borderColor
+                    ?? (isUp ? options.borderUpColor : options.borderDownColor);
 
                 if (solidBorder) {
                     ctx.fillRect(bodyLeft * scale, top * scale, (bodyRight - bodyLeft + 1) * scale, (bottom - top + 1) * scale);
                 } else {
-                    fillInnerBorder(ctx, bodyLeft, top, bodyRight - bodyLeft + 1, bottom - top + 1, borderWidth, scale);
+                    outlineBody(ctx, bodyLeft, top, bodyRight - bodyLeft + 1, bottom - top + 1, borderWidth, scale);
                 }
             }
 
@@ -359,7 +539,7 @@ export const CandlestickSeries = {
             const fillBottom = bottom - inset;
 
             if (fillTop <= fillBottom) {
-                ctx.fillStyle = isUp ? options.upColor : options.downColor;
+                ctx.fillStyle = point.color ?? (isUp ? options.upColor : options.downColor);
                 ctx.fillRect(
                     (bodyLeft + inset) * scale,
                     fillTop * scale,
@@ -376,8 +556,8 @@ export const BarSeries = {
     isBarLike: true,
     defaults: () => ({
         ...commonDefaults(),
-        upColor: '#26a69a',
-        downColor: '#ef5350',
+        upColor: '#22ab94',
+        downColor: '#f23645',
         openVisible: true,
         thinBars: true,
     }),
@@ -387,11 +567,13 @@ export const BarSeries = {
     draw(ctx, context) {
         const { series, options, priceScale, timeScale, from, to } = context;
         const tick = Math.max(1, Math.floor(timeScale.barSpacing * 0.35));
+        const source = context.conflated ?? series.byIndex;
+        const step = context.step ?? 1;
 
         ctx.lineWidth = options.thinBars ? 1 : Math.max(1, Math.floor(timeScale.barSpacing * 0.2));
 
-        for (let index = from; index <= to; index++) {
-            const point = series.byIndex[index];
+        for (let index = Math.floor(from / step) * step; index <= to; index += step) {
+            const point = source[index / step];
 
             if (! point || point.close === null || point.close === undefined) {
                 continue;
@@ -425,7 +607,7 @@ export const HistogramSeries = {
     isBarLike: true,
     defaults: () => ({
         ...commonDefaults(),
-        color: '#26a69a',
+        color: '#22ab94',
         base: 0,
         priceLineVisible: false,
         lastValueVisible: false,
@@ -436,9 +618,11 @@ export const HistogramSeries = {
         const width = Math.max(1, Math.floor(timeScale.barSpacing * 0.8));
         const half = Math.floor(width / 2);
         const baseY = priceScale.priceToY(options.base);
+        const source = context.conflated ?? series.byIndex;
+        const step = context.step ?? 1;
 
-        for (let index = from; index <= to; index++) {
-            const point = series.byIndex[index];
+        for (let index = Math.floor(from / step) * step; index <= to; index += step) {
+            const point = source[index / step];
 
             if (! point || point.value === null || point.value === undefined) {
                 continue;
@@ -475,6 +659,12 @@ export function normalisePoint(item, timestamp) {
         low: item.low ?? item.value ?? null,
         close: item.close ?? item.value ?? null,
         color: item.color,
+
+        // Per-reading overrides. A single candle can be given its own body,
+        // outline or wick — which is how a chart marks one bar out from the
+        // rest without a second series drawn on top of the first.
+        borderColor: item.borderColor,
+        wickColor: item.wickColor,
         raw: item,
     };
 }

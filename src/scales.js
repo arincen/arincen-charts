@@ -1,6 +1,9 @@
 import { FULL_BUILD } from './flags.js';
 import { PriceScaleMode } from './options.js';
 
+/** Beyond this a bar is a rectangle rather than a chart. Overridable. */
+const DEFAULT_MAX_BAR_SPACING = 200;
+
 /**
  * Index-based horizontal scale.
  *
@@ -16,13 +19,69 @@ export class TimeScale {
         this.rightOffset = options.rightOffset;
         this.width = 0;
         this.padBars = 0;
+        this.padPixels = 0;
+    }
+
+    /**
+     * The room `fitContent` leaves at each edge, in pixels.
+     *
+     * Two different reasons to leave any, and the larger wins. A candlestick
+     * needs half a bar or the outermost one is sliced down the middle, which
+     * scales with the zoom. A line needs half its stroke or the outermost pixel
+     * column falls off the canvas, which does not scale with anything — a 2px
+     * line loses 1px whether there are forty readings or forty thousand.
+     *
+     * That last case is small enough to argue about and obvious enough that
+     * every reader reports it as a bug. It is not worth being right about.
+     */
+    edgePadding() {
+        return Math.max(this.padBars * this.barSpacing, this.padPixels);
     }
 
     /**
      * @param {number[]} timestamps ascending, unique
      */
+    /**
+     * Takes new data, and decides whether the viewport should travel with it.
+     *
+     * Every bar's position is measured back from the last one, so a bar
+     * arriving moves all of them left unless something compensates. At the
+     * live edge that is exactly right — the newest bar should stay where the
+     * eye already is. Anywhere else it is wrong: a reader who has scrolled
+     * back to study something in March did not ask to be dragged forward one
+     * bar every time a tick arrives, and on a streaming chart that is the page
+     * quietly sliding out from under them.
+     *
+     * So the shift is kept only while the last bar is on screen, which is the
+     * same rule they settled on, and a caller can refuse it outright.
+     *
+     * @param {number[]} timestamps
+     */
     setPoints(timestamps) {
+        const previousLast = this.lastIndex;
+        const wasAtTheEdge = this.lastBarVisible();
+
         this.points = timestamps;
+
+        if (previousLast < 0) {
+            return;
+        }
+
+        const arrived = this.lastIndex - previousLast;
+        const shifting = this.options.shiftVisibleRangeOnNewBar !== false && wasAtTheEdge;
+
+        if (arrived > 0 && ! shifting) {
+            this.rightOffset -= arrived;
+        }
+    }
+
+    /** Whether the newest bar is currently within the viewport. */
+    lastBarVisible() {
+        if (this.width <= 0 || this.barSpacing <= 0 || this.points.length === 0) {
+            return true;
+        }
+
+        return this.rightOffset >= 0 && this.rightOffset <= this.width / this.barSpacing;
     }
 
     get lastIndex() {
@@ -51,10 +110,22 @@ export class TimeScale {
             return;
         }
 
-        const totalBars = this.padBars > 0 ? count - 1 + this.padBars * 2 : count - 1;
+        // Half a bar at each end for candles, which is the room the outermost
+        // one occupies and would otherwise lose half of.
+        this.barSpacing = this.width / (count - 1 + this.padBars * 2);
 
-        this.barSpacing = this.width / totalBars;
-        this.rightOffset = this.padBars;
+        const pad = Math.min(Math.max(this.padBars * this.barSpacing, this.padPixels), this.width / 4);
+
+        // A line reserves nothing but its own stroke, so `fitContent` still
+        // means the first and last readings sit on the edges — they simply are
+        // not sliced down the middle by the edge they sit on. When the bars are
+        // thinner than the stroke the gap stops scaling with them, so the
+        // spacing is solved again around a gap that no longer moves.
+        if (pad > this.padBars * this.barSpacing) {
+            this.barSpacing = (this.width - pad * 2) / (count - 1);
+        }
+
+        this.rightOffset = this.barSpacing > 0 ? pad / this.barSpacing : 0;
     }
 
     /**
@@ -79,6 +150,35 @@ export class TimeScale {
         const to = Math.min(this.lastIndex, Math.ceil(this.xToIndex(this.width)));
 
         return { from, to };
+    }
+
+    /**
+     * Puts a logical range on screen: `to` lands at the right edge and `from`
+     * at the left.
+     *
+     * Solved from the two identities the scale is built on rather than by
+     * searching — `xToIndex(width)` is `lastIndex + rightOffset`, so the offset
+     * follows from `to` alone, and the spacing is the width shared between the
+     * bars asked for.
+     *
+     * The range is honoured as closely as the spacing limits allow. Asking for
+     * a thousand bars in six hundred pixels runs into `minBarSpacing`, and the
+     * scale would rather show fewer bars at a legible width than shrink them to
+     * a smear.
+     *
+     * @param {number} from logical index at the left edge
+     * @param {number} to logical index at the right edge
+     */
+    setLogicalRange(from, to) {
+        const span = to - from;
+
+        if (this.width <= 0 || ! Number.isFinite(span) || span <= 0) {
+            return;
+        }
+
+        this.barSpacing = this.clampSpacing(this.width / span);
+        this.rightOffset = to - this.lastIndex;
+        this.clampToEdges();
     }
 
     /**
@@ -117,8 +217,16 @@ export class TimeScale {
         this.clampToEdges();
     }
 
+    /**
+     * The ceiling was a bare 200 for the life of this file — a number chosen
+     * because a bar wider than that is a rectangle rather than a chart. It is
+     * still the default, but a caller who wants a chart of six readings across
+     * a wide panel should be allowed to say so.
+     */
     clampSpacing(spacing) {
-        return Math.min(Math.max(spacing, this.options.minBarSpacing), 200);
+        const ceiling = this.options.maxBarSpacing > 0 ? this.options.maxBarSpacing : DEFAULT_MAX_BAR_SPACING;
+
+        return Math.min(Math.max(spacing, this.options.minBarSpacing), ceiling);
     }
 
     /**
@@ -132,14 +240,16 @@ export class TimeScale {
             return;
         }
 
+        const pad = this.edgePadding() / this.barSpacing;
+
         if (this.options.fixRightEdge) {
-            this.rightOffset = Math.min(this.rightOffset, this.padBars);
+            this.rightOffset = Math.min(this.rightOffset, pad);
         }
 
         if (this.options.fixLeftEdge) {
             const visibleBars = this.width / this.barSpacing;
 
-            this.rightOffset = Math.max(this.rightOffset, visibleBars - this.lastIndex - this.padBars);
+            this.rightOffset = Math.max(this.rightOffset, visibleBars - this.lastIndex - pad);
         }
     }
 }
@@ -356,14 +466,32 @@ export class PriceScale {
         return this.min + ratio * (this.max - this.min);
     }
 
+    /**
+     * A ratio of nought is the bottom of the scale and one is the top, unless
+     * the scale is inverted, in which case they change places.
+     *
+     * Turned round here and nowhere else. Everything on the chart — series,
+     * price lines, the crosshair, a plugin's own drawing — reaches a pixel
+     * through this one function, so inverting it inverts all of them at once,
+     * and nothing else in the library has to know the option exists.
+     *
+     * @param {number} ratio
+     * @return {number}
+     */
+    ratioToY(ratio) {
+        const upright = FULL_BUILD && this.options.invertScale ? 1 - ratio : ratio;
+
+        return this.innerBottom - upright * (this.innerBottom - this.innerTop);
+    }
+
     priceToY(price) {
-        return this.innerBottom - this.ratioFor(price) * (this.innerBottom - this.innerTop);
+        return this.ratioToY(this.ratioFor(price));
     }
 
     yToPrice(y) {
         const ratio = (this.innerBottom - y) / (this.innerBottom - this.innerTop);
 
-        return this.priceFor(ratio);
+        return this.priceFor(FULL_BUILD && this.options.invertScale ? 1 - ratio : ratio);
     }
 
     /**

@@ -12,16 +12,23 @@
  * after. A clip region set earlier still applies: clips are stored in device
  * space once set, and changing the transform afterwards does not move them.
  *
+ * An origin may be given for a target that covers part of the canvas rather
+ * than all of it — an axis strip. It cannot be applied with `translate` by the
+ * caller, because resetting the transform for bitmap space would throw that
+ * translation away and the drawing would appear in the chart's top-left
+ * corner. It belongs in the reset itself.
+ *
  * @param {CanvasRenderingContext2D} ctx
  * @param {{width: number, height: number}} mediaSize CSS pixel size
  * @param {number} pixelRatio
+ * @param {{x: number, y: number}} [origin] top-left of the target, in CSS px
  * @return {{useBitmapCoordinateSpace: Function, useMediaCoordinateSpace: Function}}
  */
-export function createRenderTarget(ctx, mediaSize, pixelRatio) {
+export function createRenderTarget(ctx, mediaSize, pixelRatio, origin = { x: 0, y: 0 }) {
     return {
         useBitmapCoordinateSpace(callback) {
             ctx.save();
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.setTransform(1, 0, 0, 1, Math.round(origin.x * pixelRatio), Math.round(origin.y * pixelRatio));
 
             try {
                 return callback({
@@ -41,6 +48,7 @@ export function createRenderTarget(ctx, mediaSize, pixelRatio) {
 
         useMediaCoordinateSpace(callback) {
             ctx.save();
+            ctx.translate(origin.x, origin.y);
 
             try {
                 return callback({ context: ctx, mediaSize });
@@ -58,21 +66,25 @@ export function createRenderTarget(ctx, mediaSize, pixelRatio) {
  * down with it — third-party drawing code should not be able to blank the
  * chart it is drawn on.
  *
+ * The set of views is named rather than fixed, because the same renderer
+ * contract serves the plot and both axis strips — only the question differs.
+ *
  * @param {Object[]} primitives
  * @param {'bottom'|'normal'|'top'} layer
  * @param {Object} target
+ * @param {string} [views] which set of views to ask for
  */
-export function drawPrimitives(primitives, layer, target) {
+export function drawPrimitives(primitives, layer, target, views = 'paneViews') {
     for (const primitive of primitives) {
-        let views;
+        let list;
 
         try {
-            views = primitive.paneViews?.() ?? [];
+            list = primitive[views]?.() ?? [];
         } catch {
             continue;
         }
 
-        for (const view of views) {
+        for (const view of list) {
             const zOrder = view.zOrder?.() ?? 'normal';
 
             if (zOrder !== layer) {

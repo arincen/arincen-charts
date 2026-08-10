@@ -14,29 +14,80 @@
 
 const FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
 
-const THEMES = {
-    light: {
-        background: '#ffffff',
-        text: '#191919',
-        grid: '#e6e6e6',
-        line: '#2962ff',
-        area: ['rgba(41, 98, 255, 0.28)', 'rgba(41, 98, 255, 0)'],
-    },
-    dark: {
-        background: '#1e1e20',
-        text: '#d1d4dc',
-        grid: '#2b2b43',
-        line: '#4fd1c5',
-        area: ['rgba(79, 209, 197, 0.28)', 'rgba(79, 209, 197, 0)'],
-    },
-    colorful: {
-        background: '#160f2e',
-        text: '#e9d8ff',
-        grid: 'rgba(233, 216, 255, 0.12)',
-        line: '#a855f7',
-        area: ['rgba(168, 85, 247, 0.55)', 'rgba(168, 85, 247, 0.02)'],
-    },
-};
+/**
+ * Reads a colour from the host page's theme tokens, falling back when there is
+ * no page — the module is also run from a bare HTML file for verification.
+ */
+function cssColour(token, fallback) {
+    if (typeof document === 'undefined') {
+        return fallback;
+    }
+
+    try {
+        const value = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
+
+        return value ? `hsl(${value})` : fallback;
+    } catch {
+        return fallback;
+    }
+}
+
+/**
+ * The same, faded.
+ *
+ * A grid is scenery. Taking it from the foreground token at a low alpha means
+ * it is the same colour as the writing and simply much quieter, which holds in
+ * light and dark without either being chosen here — and it cannot be read as a
+ * line someone drew on purpose, which a solid grey grid can.
+ */
+function cssAlpha(token, alpha, fallback) {
+    if (typeof document === 'undefined') {
+        return fallback;
+    }
+
+    try {
+        const value = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
+
+        return value ? `hsl(${value} / ${alpha})` : fallback;
+    } catch {
+        return fallback;
+    }
+}
+
+/**
+ * The default theme follows whatever page the demo is embedded in, so a demo
+ * on a dark documentation page or a dark marketing page is dark too. The other
+ * two are fixed, because they exist to show that colours are just options.
+ */
+function themeFor(name) {
+    if (name === 'dark') {
+        return {
+            background: '#1e1e20',
+            text: '#d1d4dc',
+            grid: 'rgba(255, 255, 255, 0.06)',
+            line: '#4fd1c5',
+            area: ['rgba(79, 209, 197, 0.28)', 'rgba(79, 209, 197, 0)'],
+        };
+    }
+
+    if (name === 'colorful') {
+        return {
+            background: '#160f2e',
+            text: '#e9d8ff',
+            grid: 'rgba(233, 216, 255, 0.08)',
+            line: '#a855f7',
+            area: ['rgba(168, 85, 247, 0.55)', 'rgba(168, 85, 247, 0.02)'],
+        };
+    }
+
+    return {
+        background: cssColour('--background', '#ffffff'),
+        text: cssColour('--muted-foreground', '#191919'),
+        grid: cssAlpha('--foreground', 0.07, 'rgba(128, 128, 128, 0.12)'),
+        line: '#db2777',
+        area: ['rgba(192, 38, 211, 0.30)', 'rgba(234, 88, 12, 0.02)'],
+    };
+}
 
 /**
  * @param {string} name
@@ -44,7 +95,7 @@ const THEMES = {
  * @return {Object}
  */
 function chartOptions(name, extra = {}) {
-    const theme = THEMES[name] ?? THEMES.light;
+    const theme = themeFor(name);
 
     return {
         autoSize: true,
@@ -129,7 +180,7 @@ function relatedSeries(points, seed) {
     });
 }
 
-const COMPARE_COLOURS = ['#2962ff', '#e91e63', '#00bcd4', '#ff9800', '#8e24aa'];
+const COMPARE_COLOURS = ['#c026d3', '#db2777', '#ea580c', '#0891b2', '#7c3aed'];
 
 /**
  * Standard deviation band around a moving average, drawn as a primitive rather
@@ -324,7 +375,7 @@ function watermarkPrimitive(text, colour) {
  * @return {{chart: Object, series: Object}}
  */
 function areaChart(ctx, options = {}, seriesOptions = {}) {
-    const theme = THEMES[options.theme ?? 'light'];
+    const theme = themeFor(options.theme ?? 'light');
     const chart = ctx.lib.createChart(ctx.container, chartOptions(options.theme ?? 'light', options.chart));
     const series = chart.addSeries(ctx.lib.AreaSeries, {
         lineColor: theme.line,
@@ -358,11 +409,11 @@ const NOT_LIBRARY = 'your code';
  * is also what lets you read the shape of a layer, not just its thickness.
  */
 const STACK_LAYERS = [
-    { line: '#2962ff', fill: 'rgba(41, 98, 255, 0.30)' },
-    { line: '#e5395f', fill: 'rgba(229, 57, 95, 0.30)' },
-    { line: '#f59e0b', fill: 'rgba(245, 158, 11, 0.32)' },
-    { line: '#8b5cf6', fill: 'rgba(139, 92, 246, 0.30)' },
-    { line: '#00897b', fill: 'rgba(0, 137, 123, 0.30)' },
+    { line: '#c026d3', fill: 'rgba(192, 38, 211, 0.28)' },
+    { line: '#db2777', fill: 'rgba(219, 39, 119, 0.28)' },
+    { line: '#f43f5e', fill: 'rgba(244, 63, 94, 0.28)' },
+    { line: '#ea580c', fill: 'rgba(234, 88, 12, 0.28)' },
+    { line: '#f59e0b', fill: 'rgba(245, 158, 11, 0.28)' },
 ];
 
 function stackedAreaView() {
@@ -454,12 +505,12 @@ function hlcAreaView() {
                     edge('high', false);
                     edge('low', true);
                     context.closePath();
-                    context.fillStyle = 'rgba(41, 98, 255, 0.18)';
+                    context.fillStyle = 'rgba(219, 39, 119, 0.18)';
                     context.fill();
 
                     context.beginPath();
                     edge('close', false);
-                    context.strokeStyle = '#2962ff';
+                    context.strokeStyle = '#db2777';
                     context.lineWidth = 2;
                     context.stroke();
                 });
@@ -474,10 +525,10 @@ function hlcAreaView() {
  * reason to draw a heatmap instead of a line.
  */
 const HEAT_STOPS = [
-    { at: 0, colour: [219, 234, 254] },
-    { at: 0.45, colour: [96, 165, 250] },
-    { at: 0.75, colour: [251, 191, 36] },
-    { at: 1, colour: [220, 38, 38] },
+    { at: 0, colour: [250, 232, 255] },
+    { at: 0.45, colour: [192, 38, 211] },
+    { at: 0.75, colour: [219, 39, 119] },
+    { at: 1, colour: [234, 88, 12] },
 ];
 
 function heatColour(amount) {
@@ -531,10 +582,10 @@ export const DEMOS = [
     {
         key: 'chart-type',
         title: 'Chart type',
-        blurb: 'All six series lightweight-charts ships.',
+        blurb: 'Six series types. Import the one you need and the others are never bundled.',
         options: [
             { label: 'Candles', build: (ctx) => candleDemo(ctx) },
-            { label: 'Line', build: (ctx) => simpleSeries(ctx, 'LineSeries', { color: '#2962ff', lineWidth: 2 }) },
+            { label: 'Line', build: (ctx) => simpleSeries(ctx, 'LineSeries', { color: '#db2777', lineWidth: 2 }) },
             { label: 'Bars', build: (ctx) => simpleSeries(ctx, 'BarSeries', {}) },
             { label: 'Area', build: (ctx) => areaChart(ctx) },
             { label: 'Baseline', build: (ctx) => baselineDemo(ctx) },
@@ -563,7 +614,7 @@ export const DEMOS = [
     {
         key: 'legend',
         title: 'Legend',
-        blurb: 'An HTML overlay fed by subscribeCrosshairMove. Not a library feature on either side.',
+        blurb: 'An HTML overlay fed by subscribeCrosshairMove. Yours to style, not ours to dictate.',
         badge: NOT_LIBRARY,
         options: [
             { label: '1-line legend', build: (ctx) => legendDemo(ctx, 1) },
@@ -582,7 +633,7 @@ export const DEMOS = [
     {
         key: 'additional-options',
         title: 'Additional options',
-        blurb: 'Watermarks are a primitive on our side, the same as they are in lightweight-charts v5.',
+        blurb: 'A watermark is drawing, so it is a primitive rather than a chart option.',
         options: [
             { label: 'Go to realtime button', build: (ctx) => realtimeButtonDemo(ctx) },
             { label: 'Custom watermark', build: (ctx) => watermarkDemo(ctx) },
@@ -666,7 +717,7 @@ export const DEMOS = [
     {
         key: 'custom-chart-types',
         title: 'Custom chart types',
-        blurb: 'Series drawn entirely by the caller through addCustomSeries. None of the three is a library feature.',
+        blurb: 'Series drawn entirely by you through addCustomSeries — the chart supplies coordinates, you supply the shape.',
         badge: NOT_LIBRARY,
         options: [
             { label: 'Stacked area', build: (ctx) => stackedAreaDemo(ctx) },
@@ -677,7 +728,7 @@ export const DEMOS = [
     {
         key: 'custom-plugins',
         title: 'Custom plugins',
-        blurb: 'All three are primitives — caller-written drawing code. Ours has taken the same object since Phase 2.',
+        blurb: 'All three are primitives — drawing code you write, running on a chart you did not have to fork.',
         badge: NOT_LIBRARY,
         options: [
             { label: 'Bands indicator', build: (ctx) => bandsDemo(ctx) },
@@ -721,7 +772,7 @@ function priceLineTitlesDemo(ctx) {
     ].forEach(({ price, title }) => series.createPriceLine({
         price,
         title,
-        color: '#2962ff',
+        color: '#db2777',
         lineWidth: 2,
         axisLabelVisible: true,
     }));
@@ -900,7 +951,7 @@ function movingAverageDemo(ctx) {
     candles.setData(ctx.points);
 
     const average = chart.addSeries(ctx.lib.LineSeries, {
-        color: '#2962ff',
+        color: '#db2777',
         lineWidth: 2,
         priceLineVisible: false,
         lastValueVisible: false,
@@ -920,9 +971,9 @@ function bandsDemo(ctx) {
     });
 
     series.attachPrimitive(bandsPrimitive(series, volatilityBand(ctx.points, 20, 2), {
-        fill: 'rgba(41, 98, 255, 0.14)',
-        edge: 'rgba(41, 98, 255, 0.85)',
-        middle: 'rgba(41, 98, 255, 0.55)',
+        fill: 'rgba(219, 39, 119, 0.14)',
+        edge: 'rgba(219, 39, 119, 0.85)',
+        middle: 'rgba(219, 39, 119, 0.55)',
     }));
 
     return { chart, series };
@@ -935,7 +986,7 @@ function partialLineDemo(ctx) {
     // Whitespace to the right of the last bar, so the line has somewhere to run
     // to — with the data fitted exactly to the width there is nothing to see.
     chart.timeScale().applyOptions({ rightOffset: 14 });
-    series.attachPrimitive(partialPriceLinePrimitive(series, last.time, closeOf(last), '#2962ff'));
+    series.attachPrimitive(partialPriceLinePrimitive(series, last.time, closeOf(last), '#db2777'));
 
     return { chart, series };
 }
@@ -1063,7 +1114,7 @@ function twoScalesDemo(ctx) {
         handleScale: { axisPressedMouseMove: true, mouseWheel: false, pinch: false },
         handleScroll: false,
     }));
-    const right = chart.addSeries(ctx.lib.LineSeries, { color: '#2962ff', lineWidth: 2 });
+    const right = chart.addSeries(ctx.lib.LineSeries, { color: '#db2777', lineWidth: 2 });
 
     right.setData(ctx.points.map((point) => ({ time: point.time, value: closeOf(point) })));
 
@@ -1090,7 +1141,7 @@ function twoScalesDemo(ctx) {
 function overlayScaleDemo(ctx) {
     const chart = ctx.lib.createChart(ctx.container, chartOptions('light'));
     const volume = chart.addSeries(ctx.lib.HistogramSeries, {
-        color: 'rgba(41, 98, 255, 0.35)',
+        color: 'rgba(219, 39, 119, 0.35)',
         priceScaleId: 'volume',
         priceLineVisible: false,
         lastValueVisible: false,
@@ -1123,9 +1174,9 @@ function infiniteHistoryDemo(ctx) {
         handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: false },
     }));
     const series = chart.addSeries(ctx.lib.AreaSeries, {
-        lineColor: '#2962ff',
-        topColor: 'rgba(41, 98, 255, 0.28)',
-        bottomColor: 'rgba(41, 98, 255, 0)',
+        lineColor: '#db2777',
+        topColor: 'rgba(219, 39, 119, 0.28)',
+        bottomColor: 'rgba(219, 39, 119, 0)',
         lineWidth: 2,
     });
 

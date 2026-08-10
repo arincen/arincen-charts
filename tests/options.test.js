@@ -72,6 +72,24 @@ test('a wheel notch and a trackpad flick both stay within one step', () => {
     }
 });
 
+/**
+ * The unit a browser reports a wheel in is the browser's choice, not the
+ * user's: Chrome sends pixels, Firefox sends lines, and a page-scrolling
+ * device sends pages. One physical detent of the same wheel must zoom the same
+ * amount in all three, or the chart is faster in one browser than another.
+ */
+test('one turn of the wheel is one step, whichever unit the browser reports', () => {
+    const detents = [
+        { deltaY: -100, deltaMode: 0 },
+        { deltaY: -3, deltaMode: 1 },
+        { deltaY: -1, deltaMode: 2 },
+    ];
+
+    for (const event of detents) {
+        assert.equal(wheelZoomStep(event), 1, `mode ${event.deltaMode} did not give a whole step`);
+    }
+});
+
 test('a small trackpad delta produces a proportionally small step', () => {
     const flick = Math.abs(wheelZoomStep({ deltaY: -4, deltaMode: 0 }));
     const notch = Math.abs(wheelZoomStep({ deltaY: -100, deltaMode: 0 }));

@@ -4,7 +4,7 @@
     "description": "A financial chart in about 13 KB, with zero dependencies. Two builds from one codebase: a light one that compiles structural features out, and a full one that keeps them.",
     "license": "MIT",
     "author": "Arincen L.L.C-FZ",
-    "homepage": "https://en.arincen.com/charts",
+    "homepage": "https://en.arincen.com/arincen-charts",
     "repository": {
         "type": "git",
         "url": "git+https://github.com/arincen/arincen-charts.git"

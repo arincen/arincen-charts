@@ -12,19 +12,41 @@ import { CandlestickSeries } from '../src/series.js';
  */
 function recordingContext(pixelRatio) {
     const rects = [];
+    let lineWidth = 1;
 
     return {
         rects,
         fillStyle: '',
-        set lineWidth(value) {},
+        strokeStyle: '',
+        get lineWidth() {
+            return lineWidth;
+        },
+        set lineWidth(value) {
+            lineWidth = value;
+        },
         save() {},
         restore() {},
         beginPath() {},
         moveTo() {},
         lineTo() {},
         stroke() {},
+
+        /**
+         * Recorded as the ink it lays down rather than as the path asked for.
+         * Canvas centres a stroke on its path, so it covers half a line width
+         * either side — which is precisely how the border used to spill past
+         * the body while every measurement said it fitted.
+         */
         strokeRect(x, y, width, height) {
-            rects.push({ x, y, width, height, stroked: true });
+            const half = lineWidth / 2;
+
+            rects.push({
+                left: Math.round((x - half) * pixelRatio),
+                width: Math.round((width + lineWidth) * pixelRatio),
+                top: (y - half) * pixelRatio,
+                height: (height + lineWidth) * pixelRatio,
+                stroked: true,
+            });
         },
         fillRect(x, y, width, height) {
             rects.push({
@@ -43,18 +65,18 @@ function recordingContext(pixelRatio) {
  * @param {number} pixelRatio
  * @param {number} count
  */
-function drawCandles(barSpacing, pixelRatio, count = 20) {
+function drawCandles(barSpacing, pixelRatio, count = 20, { body = 1, ...options } = {}) {
     const points = Array.from({ length: count }, (_, index) => ({
         open: 100 + index,
-        high: 102 + index,
+        high: 102 + body + index,
         low: 98 + index,
-        close: 101 + index,
+        close: 100 + body + index,
     }));
     const ctx = recordingContext(pixelRatio);
 
     CandlestickSeries.draw(ctx, {
         series: { byIndex: points },
-        options: CandlestickSeries.defaults(),
+        options: { ...CandlestickSeries.defaults(), ...options },
         priceScale: { priceToY: (price) => 400 - price },
         timeScale: { barSpacing, indexToX: (index) => 20 + index * barSpacing },
         pixelRatio,
@@ -72,7 +94,7 @@ function drawCandles(barSpacing, pixelRatio, count = 20) {
 function occupiedColumns(rects) {
     const columns = new Set();
 
-    for (const rect of rects.filter((candidate) => ! candidate.stroked)) {
+    for (const rect of rects) {
         for (let x = rect.left; x < rect.left + rect.width; x++) {
             columns.add(x);
         }
@@ -152,10 +174,51 @@ test('a candle never draws wider than the space it was given', () => {
     }
 });
 
-test('the border is drawn inside the body, never stroked around it', () => {
-    const rects = drawCandles(5.2, 2);
+/**
+ * The invariant, stated as the thing a reader would notice rather than as the
+ * call we happen to make: turning the border on must not make the candle any
+ * wider. The defect this replaces was a stroke centred on the body's edge,
+ * which added a pixel each side and fused the candles into a band.
+ *
+ * Checked against the same chart drawn without a border, so it holds whichever
+ * way the outline is painted. Its predecessor asserted that `strokeRect` was
+ * never called, which stopped being the same question the moment the outline
+ * became an inset stroke — and, worse, went on passing.
+ */
+test('turning the border on does not widen the candle', () => {
+    for (const [barSpacing, pixelRatio] of [[9, 2], [12, 2], [16, 1], [5.2, 2]]) {
+        const bordered = occupiedColumns(drawCandles(barSpacing, pixelRatio, 20, { body: 8 }));
+        const plain = occupiedColumns(drawCandles(barSpacing, pixelRatio, 20, { body: 8, borderVisible: false }));
 
-    assert.equal(rects.filter((rect) => rect.stroked).length, 0, 'a stroked rectangle spills outside the body');
+        assert.deepEqual(
+            [...bordered].sort((a, b) => a - b),
+            [...plain].sort((a, b) => a - b),
+            `the border changed the footprint at ${barSpacing}/${pixelRatio}`,
+        );
+    }
+});
+
+/**
+ * A body eight device pixels tall at ratio 2 is comfortably taller than two
+ * borders, so it takes the outline path. Without this the whole suite draws
+ * bodies three pixels tall, every one of them falls through to the solid fill,
+ * and the outline goes untested — which is exactly what happened.
+ */
+test('a candle tall enough to hold an outline is drawn with one', () => {
+    const rects = drawCandles(9, 2, 20, { body: 8 });
+
+    assert.ok(rects.some((rect) => rect.stroked), 'no candle was outlined');
+});
+
+/**
+ * A doji is a line. An outline around a line either paints outside the body or
+ * leaves nothing in the middle; both read as a rendering fault.
+ */
+test('a body too thin to hold an outline is filled instead', () => {
+    const rects = drawCandles(9, 2, 20, { body: 0 });
+
+    assert.ok(rects.length > 0, 'a doji drew nothing at all');
+    assert.ok(! rects.some((rect) => rect.stroked), 'a doji was outlined rather than filled');
 });
 
 test('every candle is the same width', () => {

@@ -3,7 +3,7 @@ import { FULL_BUILD } from './flags.js';
 import { paneApis, addPane, removePane, movePane, scaleRecord } from './panes.js';
 import { customSeriesDefinition } from './custom-series.js';
 
-export { LineStyle, CrosshairMode, PriceScaleMode } from './options.js';
+export { LineStyle, LineType, PriceLineSource, CrosshairMode, PriceScaleMode } from './options.js';
 export {
     LineSeries,
     AreaSeries,
@@ -21,7 +21,7 @@ export {
  * import.
  *
  * @param {HTMLElement} container
- * @param {Object} [options]
+ * @param {import('./types.js').ChartOptions} [options]
  * @return {import('./types.js').ChartApi}
  */
 export function createChart(container, options) {
@@ -50,6 +50,48 @@ export function createChart(container, options) {
         unsubscribeCrosshairMove: (handler) => chart.crosshairHandlers.delete(handler),
         subscribeClick: (handler) => chart.clickHandlers.add(handler),
         unsubscribeClick: (handler) => chart.clickHandlers.delete(handler),
+        subscribeDblClick: (handler) => chart.dblClickHandlers.add(handler),
+        unsubscribeDblClick: (handler) => chart.dblClickHandlers.delete(handler),
+
+        /**
+         * Puts the crosshair somewhere without a pointer being there.
+         *
+         * The reason this exists is two charts side by side: hover one, and
+         * the other has to show the same moment. There is no other way to say
+         * that, because every other route into the crosshair starts from a
+         * mouse event that the second chart never receives.
+         *
+         * Deliberately does not emit a crosshair event. A pair of charts
+         * subscribed to each other would otherwise call each other forever,
+         * and the first thing anybody builds with this is a pair of charts
+         * subscribed to each other.
+         */
+        setCrosshairPosition: (price, horizontalPosition, seriesApi) => {
+            chart.setCrosshair(price, horizontalPosition, seriesApi);
+        },
+        clearCrosshairPosition: () => chart.clearCrosshair(),
+
+        /** The plot surface, excluding both axes. Plugin authors ask for this. */
+        paneSize: (paneIndex = 0) => {
+            chart.ensureLayout();
+
+            const pane = chart.panes[paneIndex] ?? chart.panes[0];
+
+            return {
+                width: Math.max(0, pane.plot.right - pane.plot.left),
+                height: Math.max(0, pane.plot.bottom - pane.plot.top),
+            };
+        },
+
+        /**
+         * Whether the chart is currently sizing itself from its container.
+         *
+         * Not simply the option back again: `autoSize` asks for it, and it is
+         * refused when the browser has no `ResizeObserver` to do it with. A
+         * caller who needs to resize the chart by hand has to know which of
+         * those two situations they are in.
+         */
+        autoSizeActive: () => Boolean(chart.resizeObserver),
         takeScreenshot: () => {
             const canvas = document.createElement('canvas');
             const ratio = window.devicePixelRatio || 1;
