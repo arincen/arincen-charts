@@ -6,6 +6,7 @@ import { toImage, toCSV } from './export.js';
 import { toContext } from './context.js';
 import { toText } from './describe.js';
 import { annotate, clearAnnotations } from './annotate.js';
+import { register, unregister } from './registry.js';
 
 export { LineStyle, LineType, PriceLineSource, CrosshairMode, PriceScaleMode } from './options.js';
 export { sparkline } from './sparkline.js';
@@ -46,7 +47,10 @@ export function createChart(container, options) {
         applyOptions: (nextOptions) => chart.applyOptions(nextOptions),
         options: () => chart.options,
         resize: (width, height) => chart.resize(width, height),
-        remove: () => chart.remove(),
+        remove: () => {
+            unregister(api);
+            chart.remove();
+        },
         timeScale: () => chart.timeScaleApi,
         priceScale: (id) => (FULL_BUILD
             ? chart.priceScaleApiFor(scaleRecord(chart.panes[0], id))
@@ -169,6 +173,10 @@ export function createChart(container, options) {
     // Primitives are handed the chart in `attached`, so the instance needs a
     // way back to its own public surface.
     chart.api = api;
+
+    // Last, so nothing half-built is ever reachable from the page: whoever
+    // finds this chart finds one that answers every call on it.
+    register(api);
 
     return api;
 }

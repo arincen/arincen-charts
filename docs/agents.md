@@ -32,6 +32,7 @@ agent is simply the first caller that needed all of it named in one place.
 | `chart.pointer()` | where the reader is pointing, asked at any moment |
 | `chart.subscribeCrosshairMove(handler)` | the same thing as an event, as it moves |
 | `series.priceToCoordinate(price)` | data space to screen space, when you draw |
+| `window.arincenCharts` | every live chart on the page, for a caller that did not build them |
 
 **The hand**
 
@@ -551,6 +552,46 @@ await ask({
 Text costs a fraction of what an image costs and carries the exact numbers, so
 `toText` is the one to reach for first. The picture is worth sending when the
 question is about shape.
+
+## Finding the charts on a page you did not write
+
+Everything above assumes a caller holding the chart object, which assumes a page
+written to cooperate. The interesting case is the other one: a browser agent, an
+extension, a computer-use model, a test harness — arriving at a page nobody
+prepared for it, needing to find the chart before it can ask anything at all.
+Their alternative is reading pixels.
+
+So every chart puts itself on the page:
+
+```js
+window.arincenCharts;        // [chart, chart, …] in the order they were built
+
+const [chart] = window.arincenCharts;
+
+chart.toText();
+chart.annotate([{ price: 148, text: 'resistance' }]);
+```
+
+These are the same public objects the page itself holds, so everything on this
+page works through them. A chart takes itself off the list when it is removed —
+a registry that leaks hands an agent a destroyed chart and an exception it
+cannot interpret.
+
+Nothing is exposed here that a script on the page could not already reach
+through the DOM; what is new is that it does not have to go looking. For a
+browser agent that is one evaluated expression:
+
+```js
+// Playwright, Puppeteer, or anything else driving a real browser
+const described = await page.evaluate(() => window.arincenCharts.map((chart) => chart.toText()));
+
+// …then draw the answer back where the reader can see it
+await page.evaluate((notes) => window.arincenCharts[0].annotate(notes), notes);
+```
+
+That is the whole loop without the page's cooperation: find, read, decide,
+draw. It costs about a hundred bytes, and it is the reason the rest of this page
+is worth anything to somebody who did not write the site.
 
 ## Tool definitions, ready to paste
 
