@@ -60,7 +60,10 @@ test('the mark links to a page on our own site, over https', () => {
 
     assert.equal(url.protocol, 'https:');
     assert.match(url.hostname, /arincen\.com$/);
-    assert.equal(url.pathname, '/arincen-charts');
+    // The home page rather than the library's own: a click from somebody
+    // else's chart is a stranger meeting the company, and the charts page is
+    // one link away from there.
+    assert.equal(url.pathname, '/');
 });
 
 test('and carries a campaign parameter, so the traffic can be counted', () => {
