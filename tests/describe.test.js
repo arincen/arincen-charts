@@ -209,6 +209,54 @@ test('an intraday chart carries the clock into its dates', () => {
     chart.remove();
 });
 
+/* ------------------------------------------------------------ a period asked for */
+
+/**
+ * "What happened in March?" is a question about March. Answering it should not
+ * scroll the chart the reader is looking at, so the period is an argument
+ * rather than something the caller has to set up and put back.
+ */
+test('it describes a period without moving the view', () => {
+    const chart = built((made) => made.addSeries(LineSeries, { title: 'AAPL' }).setData(rising(100)));
+    const before = chart.timeScale().getVisibleRange();
+
+    const said = chart.toText({ from: start + 10 * day, to: start + 20 * day });
+
+    assert.match(said, /Showing 2024-01-11 to 2024-01-21, 11 of them/);
+
+    // 110 is the reading at index 10, 120 at index 20: the window, not the data.
+    assert.match(said, /last 120\.00/);
+    assert.match(said, /high 120\.00/);
+    assert.match(said, /low 110\.00/);
+
+    assert.deepEqual(chart.timeScale().getVisibleRange(), before, 'the view moved');
+
+    chart.remove();
+});
+
+test('a period handed over backwards describes the same window', () => {
+    const chart = built((made) => made.addSeries(LineSeries, { title: 'AAPL' }).setData(rising(100)));
+
+    assert.equal(
+        chart.toText({ from: start + 20 * day, to: start + 10 * day }),
+        chart.toText({ from: start + 10 * day, to: start + 20 * day }),
+    );
+
+    chart.remove();
+});
+
+test('a period lands on the nearest readings when the market was shut', () => {
+    const chart = built((made) => made.addSeries(LineSeries, { title: 'AAPL' }).setData(rising(100)));
+
+    // Six hours past the reading at index 10, and nowhere near index 11.
+    assert.match(
+        chart.toText({ from: start + 10 * day + 6 * 3600, to: start + 20 * day }),
+        /Showing 2024-01-11 to 2024-01-21/,
+    );
+
+    chart.remove();
+});
+
 /* ------------------------------------------------------------- what it is not */
 
 test('it states, and does not interpret', () => {

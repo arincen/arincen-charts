@@ -3698,6 +3698,7 @@ export class Chart {
             y: scale.priceScale.priceToY(price),
             x: this.timeScale.indexToX(index),
             pane,
+            scale,
         };
 
         this.drawCrosshair();
@@ -3739,6 +3740,44 @@ export class Chart {
             return;
         }
 
+        const param = this.crosshairParam(index, point, event);
+
+        for (const handler of this.crosshairHandlers) {
+            handler(param);
+        }
+    }
+
+    /**
+     * What is under the pointer, as a question rather than as an event.
+     *
+     * `subscribeCrosshairMove` is the right shape for a tooltip, which has to
+     * react. It is the wrong shape for anything that arrives later and needs to
+     * know where the reader is pointing — an agent asked "what is this candle?"
+     * cannot subscribe retroactively, and keeping a copy of the last event in
+     * a variable is what every caller would otherwise write.
+     *
+     * Null when the pointer is not over the chart, which is a real answer and
+     * not a failure.
+     *
+     * @returns {Object|null}
+     */
+    crosshairState() {
+        if (! this.crosshair) {
+            return null;
+        }
+
+        const { index, x, y, pane, scale } = this.crosshair;
+        const param = this.crosshairParam(index, { x, y });
+
+        // The scale the y was measured on. They differ only when the crosshair
+        // was placed programmatically against a series on an overlay scale;
+        // taking the pane's would report the right number off the wrong axis.
+        param.price = (scale ?? pane).priceScale.yToPrice(y);
+
+        return param;
+    }
+
+    crosshairParam(index, point, event) {
         const all = this.allSeries;
         const seriesData = new Map();
         let hoveredSeries;
@@ -3769,9 +3808,7 @@ export class Chart {
             sourceEvent: event,
         };
 
-        for (const handler of this.crosshairHandlers) {
-            handler(param);
-        }
+        return param;
     }
 
     scrollBy(deltaPixels) {

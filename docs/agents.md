@@ -26,9 +26,11 @@ agent is simply the first caller that needed all of it named in one place.
 |---|---|
 | `chart.toText()` | what is on screen, as sentences |
 | `chart.toImage()` | the same view as a PNG, for a vision model |
+| `chart.toContext()` | the same reading as an object, for arithmetic — full build |
 | `chart.timeScale().getVisibleRange()` | the period being looked at, as times |
 | `chart.timeScale().getVisibleLogicalRange()` | the same, as bar indices |
-| `chart.subscribeCrosshairMove(handler)` | where the pointer is, as it moves |
+| `chart.pointer()` | where the reader is pointing, asked at any moment |
+| `chart.subscribeCrosshairMove(handler)` | the same thing as an event, as it moves |
 | `series.priceToCoordinate(price)` | data space to screen space, when you draw |
 
 **The hand**
@@ -155,13 +157,245 @@ any of those words appear.
 *"high 150"* about a chart holding five years will say something wrong about the
 other four. Pass `{ visible: false }` for the whole series.
 
+**Or ask about a period the reader is not looking at:**
+
+```js
+chart.toText({ from: '2024-03-01', to: '2024-03-31' });
+```
+
+*"What happened in March?"* is a question about March, and answering it should
+not scroll the chart out from under the person who asked. The view stays where
+it is. Bounds land on the nearest readings — a period asked about in whole
+months rarely lines up with a trading day — and they may be handed over in
+either order, because a model returns them in either order.
+
 Prices come out through your own `priceFormatter`, so a chart labelled in
 dollars describes itself in dollars. Extremes are read from highs and lows on a
 candlestick — the highest wick, which is the number a reader would give — not
 from closes.
 
+**Click twice on the chart to choose a period** — the stretch you picked is
+shaded, and the sentence underneath describes exactly it. That is the shape of
+the real question: a reader points at the part they mean, and the answer is
+about that part.
+
+The buttons are the other three ways to ask. It opens zoomed into the last
+stretch, so they genuinely differ: the window says one thing, the whole series
+says another, and April 2024 says a third. Drag the chart with **On screen**
+chosen and the sentence follows the view; choose any of the others and the view
+stays exactly where it is.
+
+<ChartDemo :height="440">
+
+```js
+chart.applyOptions({ autoSize: false, width: container.offsetWidth, height: 250 });
+
+const series = chart.addSeries(CandlestickSeries, {
+    upColor: '#22ab94',
+    downColor: '#f23645',
+    borderUpColor: '#22ab94',
+    borderDownColor: '#f23645',
+    wickUpColor: '#22ab94',
+    wickDownColor: '#f23645',
+    title: 'ARN',
+});
+
+const bars = data.slice(-120);
+
+// A named month, written the way somebody would ask for it. Neither bound is
+// a trading day the data happens to hold — they land on the nearest readings.
+const month = { from: '2024-04-01', to: '2024-04-30' };
+
+series.setData(bars);
+
+// Deliberately not fitContent: with every bar on screen, "what is on screen"
+// and "the whole series" are the same sentence, and a demo where two buttons
+// print the same thing teaches nothing.
+chart.timeScale().setVisibleLogicalRange({ from: bars.length - 45, to: bars.length - 1 });
+
+const readout = document.createElement('pre');
+
+readout.style.cssText = 'position:absolute;top:258px;left:0;right:0;bottom:0;z-index:3;margin:0;'
+    + 'overflow:auto;padding:38px 12px 10px;border-top:1px solid rgba(127,127,127,0.25);'
+    + 'font:500 10px ui-monospace,monospace;white-space:pre-wrap;opacity:0.85';
+container.appendChild(readout);
+
+const bar = document.createElement('div');
+
+bar.style.cssText = 'position:absolute;top:266px;left:12px;z-index:4;display:flex;gap:6px';
+container.appendChild(bar);
+
+const iso = (time) => (typeof time === 'string' ? time : new Date(time * 1000).toISOString().slice(0, 10));
+
+// The period the reader picks by clicking the chart twice.
+const picked = { from: null, to: null };
+
+const asked = [
+    { label: 'On screen', call: () => 'chart.toText()', run: () => chart.toText() },
+    {
+        label: 'The whole series',
+        call: () => 'chart.toText({ visible: false })',
+        run: () => chart.toText({ visible: false }),
+    },
+    {
+        label: 'April 2024',
+        call: () => `chart.toText({ from: '${month.from}', to: '${month.to}' })`,
+        run: () => chart.toText(month),
+    },
+    {
+        label: 'Two clicks on the chart',
+        call: () => (picked.to
+            ? `chart.toText({ from: '${iso(picked.from)}', to: '${iso(picked.to)}' })`
+            : 'chart.toText({ from, to })'),
+        run: () => {
+            if (! picked.to) {
+                return picked.from
+                    ? `Started at ${iso(picked.from)}. Click once more to close the period.`
+                    : 'Click twice on the chart to choose a period.';
+            }
+
+            return chart.toText({ from: picked.from, to: picked.to });
+        },
+    },
+];
+
+let chosen = asked[0];
+const buttons = new Map();
+
+const render = () => {
+    for (const [question, element] of buttons) {
+        const active = question === chosen;
+
+        element.style.background = active ? '#db2777' : 'transparent';
+        element.style.color = active ? '#fff' : '#db2777';
+    }
+
+    readout.textContent = `${chosen.call()}\n\n${chosen.run()}`;
+};
+
+/**
+ * Choosing the period on the chart itself, which is how a reader actually asks
+ * about one: they point at the stretch they mean. The first click opens it, the
+ * second closes it and shades it, and a third starts again.
+ */
+const choosing = asked[asked.length - 1];
+let shaded = null;
+
+const onClick = (param) => {
+    if (param.time === undefined) {
+        return;
+    }
+
+    if (picked.to || ! picked.from) {
+        shaded?.clear();
+        shaded = null;
+        picked.from = param.time;
+        picked.to = null;
+    } else {
+        picked.to = param.time;
+        shaded = chart.annotate([{ from: picked.from, to: picked.to, text: 'the period you chose' }]);
+    }
+
+    chosen = choosing;
+    render();
+};
+
+chart.subscribeClick(onClick);
+onCleanup(() => chart.unsubscribeClick(onClick));
+
+for (const question of asked) {
+    const element = document.createElement('button');
+
+    element.textContent = question.label;
+    element.style.cssText = 'font:600 11px system-ui;padding:3px 10px;border-radius:999px;'
+        + 'border:1px solid #db2777;cursor:pointer';
+    element.onclick = () => {
+        chosen = question;
+        render();
+    };
+
+    buttons.set(question, element);
+    bar.appendChild(element);
+}
+
+render();
+chart.timeScale().subscribeVisibleLogicalRangeChange(render);
+onCleanup(() => chart.timeScale().unsubscribeVisibleLogicalRangeChange(render));
+```
+
+</ChartDemo>
+
 It is also the plainest accessible summary of a chart there is, which is the
 other reason to have it.
+
+## `toContext`
+
+The same reading as an object, for the half of the work that is arithmetic
+rather than language. Full build.
+
+```js
+chart.toContext();
+// {
+//     range:  { from: '2024-04-01', to: '2024-06-28', bars: 89, whole: false },
+//     data:   { from: '2024-01-01', to: '2024-06-28', bars: 180 },
+//     series: [{ title: 'AAPL', type: 'candlestick', visible: true, readings: 89,
+//                first: 126.8, last: 142.56,
+//                high: { price: 150.10, time: '2024-06-20' },
+//                low:  { price: 98.20,  time: '2024-04-03' },
+//                changePercent: 12.42 }],
+//     pointer: null,
+//     drawn:   { markers: 3, priceLines: 1, regions: 0 },
+// }
+```
+
+**Reach for `toText` first.** A model reasons perfectly well from prose, and
+prose costs a fraction of the tokens. This is for a threshold, a table, a second
+chart drawn from the same numbers — anywhere parsing English back into floats is
+work somebody has already done wrong.
+
+The two cannot disagree: both take their window from the same place and their
+figures from the same summary, so the sentence and the object always report the
+same high. It takes the same `visible` and `from`/`to` options.
+
+It carries only what the chart genuinely knows. There are no indicators, no
+drawings and no selection in this library, and inventing fields for them would
+be a promise the rest of the code does not keep.
+
+**Drag the chart and watch the object change.** `range` and every figure under
+`series` follow the window you are looking at; `data` stays put, because it
+describes everything the chart holds. Hover it and `pointer` fills in.
+
+Times come back in the form your data used — these readings carry unix seconds,
+so that is what you see. `toText` formats dates for reading; this hands back what
+you gave it, so it can go straight into `annotate` or `setVisibleRange`.
+
+<ChartDemo :height="440">
+
+```js
+chart.applyOptions({ autoSize: false, width: container.offsetWidth, height: 200 });
+
+chart.addSeries(LineSeries, { color: '#db2777', lineWidth: 2, title: 'ARN' })
+    .setData(data.slice(-60));
+chart.timeScale().fitContent();
+
+const readout = document.createElement('pre');
+
+readout.style.cssText = 'position:absolute;top:208px;left:0;right:0;bottom:0;z-index:3;margin:0;'
+    + 'overflow:auto;padding:10px 12px;border-top:1px solid rgba(127,127,127,0.25);'
+    + 'font:500 10px ui-monospace,monospace;white-space:pre-wrap;opacity:0.8';
+container.appendChild(readout);
+
+// The whole object, on every change, so nothing is hidden behind a summary of
+// it. A window is what this call is about — if it did not follow the view
+// there would be no reason to prefer it to reading the data you already have.
+const show = () => { readout.textContent = JSON.stringify(chart.toContext(), null, 1); };
+const timer = setInterval(show, 200);
+
+show();
+onCleanup(() => clearInterval(timer));
+```
+
+</ChartDemo>
 
 ## `annotate`
 
@@ -187,6 +421,77 @@ three land on three unrelated APIs, one of which you have to write yourself.
 
 **Nothing here interprets anything.** It is a drawing call whose input happens
 to be easy for a model to produce.
+
+## `pointer`
+
+Where the reader is pointing, asked whenever you need it.
+
+```js
+chart.pointer();
+// null, or:
+// {
+//     time: '2024-06-20',            price: 148.31,
+//     logical: 122,                  point: { x: 412, y: 96 },
+//     seriesData: Map { AAPL => { time, open, high, low, close } },
+//     hoveredSeries, hoveredObjectId,
+// }
+```
+
+`subscribeCrosshairMove` is the right shape for a tooltip, which has to react
+the instant the pointer moves. It is the wrong shape for anything that arrives
+afterwards — *"what is this candle?"* is asked about a position the pointer
+reached a second ago, and an answer needs the state, not the event. Without
+this, every caller keeps its own copy of the last event in a variable, which is
+the same three lines written in every project.
+
+It is `null` when the pointer is not over the plot. That is an answer — nobody
+is pointing at anything — and worth passing on rather than treating as a
+failure.
+
+The price is read from the scale the crosshair is on, so a series on a second
+scale reports its own number rather than a plausible one off the wrong axis.
+
+**Move the pointer over the chart.** Nothing below is subscribed to anything —
+a timer asks `chart.pointer()` five times a second and prints whatever comes
+back, which is exactly the shape of an agent asking after the fact. Move the
+pointer away and it answers `null`, because nobody is pointing at anything.
+
+<ChartDemo :height="360">
+
+```js
+chart.applyOptions({ autoSize: false, width: container.offsetWidth, height: 260 });
+
+const series = chart.addSeries(LineSeries, { color: '#db2777', lineWidth: 2, title: 'ARN' });
+
+series.setData(data.slice(-60));
+chart.timeScale().fitContent();
+
+const readout = document.createElement('pre');
+
+readout.style.cssText = 'position:absolute;top:268px;left:0;right:0;bottom:0;z-index:3;margin:0;'
+    + 'padding:10px 12px;border-top:1px solid rgba(127,127,127,0.25);'
+    + 'font:500 11px ui-monospace,monospace;opacity:0.8';
+container.appendChild(readout);
+
+// No handler is registered. This asks the question, which is the difference
+// between `pointer()` and `subscribeCrosshairMove` — and the reason a caller
+// that arrives late can still find out where the reader is looking.
+const ask = () => {
+    const at = chart.pointer();
+
+    readout.textContent = at
+        ? `chart.pointer()\n\n  time    ${at.time}\n  price   ${at.price.toFixed(2)}`
+            + `\n  bar     ${at.logical}\n  value   ${at.seriesData.get(series)?.value ?? '—'}`
+        : 'chart.pointer()\n\n  null — the pointer is not over the chart';
+};
+
+const timer = setInterval(ask, 200);
+
+ask();
+onCleanup(() => clearInterval(timer));
+```
+
+</ChartDemo>
 
 ## Sending the picture instead
 
@@ -224,6 +529,11 @@ in the bundle; it is a description of the API above, and it costs no bytes.
         }
       }
     }
+  },
+  {
+    "name": "read_pointer",
+    "description": "What the reader is pointing at right now: the time, the price and the reading under the pointer. Returns nothing when the pointer is not over the chart. Call this when the user says 'this candle' or 'here'.",
+    "input_schema": { "type": "object", "properties": {} }
   },
   {
     "name": "set_visible_range",
@@ -274,7 +584,12 @@ Wiring them to the chart is the boring part, and it is this short:
 
 ```js
 const tools = {
-    read_chart: ({ visible = true }) => chart.toText({ visible }),
+    read_chart: ({ visible = true, from, to }) => chart.toText({ visible, from, to }),
+    read_pointer: () => {
+        const at = chart.pointer();
+
+        return at ? `${at.time} at ${at.price.toFixed(2)}` : 'nothing under the pointer';
+    },
     set_visible_range: ({ from, to }) => chart.timeScale().setVisibleRange({ from, to }),
     annotate_chart: ({ notes }) => {
         drawn?.clear();

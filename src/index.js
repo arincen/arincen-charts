@@ -3,6 +3,7 @@ import { FULL_BUILD } from './flags.js';
 import { paneApis, addPane, removePane, movePane, scaleRecord } from './panes.js';
 import { customSeriesDefinition } from './custom-series.js';
 import { toImage, toCSV } from './export.js';
+import { toContext } from './context.js';
 import { toText } from './describe.js';
 import { annotate } from './annotate.js';
 
@@ -121,6 +122,7 @@ export function createChart(container, options) {
     api.toText = (textOptions) => toText(chart, textOptions);
     api.toImage = (imageOptions) => toImage(chart, imageOptions);
     api.annotate = (notes, annotateOptions) => annotate(chart, notes, annotateOptions);
+    api.pointer = () => chart.crosshairState();
 
     // Panes are wired here rather than as methods on the chart. A minifier
     // never drops a class method, so a `panes()` method would hold the whole
@@ -133,6 +135,7 @@ export function createChart(container, options) {
             paneIndex,
         );
         api.toCSV = (csvOptions) => toCSV(chart, csvOptions);
+        api.toContext = (contextOptions) => toContext(chart, contextOptions);
         api.panes = () => paneApis(chart);
         api.addPane = (index) => addPane(chart, index);
         api.removePane = (index) => {
