@@ -62,7 +62,7 @@ So the split is made at build time:
 
 | | size | has |
 |---|---|---|
-| `@arincen/charts` | ~24 KB | line, area, candlestick, bar, histogram, baseline · crosshair · markers · price lines · primitives · pan/zoom |
+| `@arincen/charts` | ~25 KB | line, area, candlestick, bar, histogram, baseline · crosshair · markers · price lines · primitives · pan/zoom |
 | `@arincen/charts/full` | ~33 KB | all of that, plus panes, logarithmic / percentage / indexed price scales, left and overlay scales, custom series, watermarks, touch tracking, kinetic scroll |
 
 ```js

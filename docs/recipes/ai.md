@@ -1,6 +1,6 @@
 # A chart an agent can read
 
-Three calls, all full build. The chart says what it is showing, hands over a
+Three calls, in both builds. The chart says what it is showing, hands over a
 picture, and draws back whatever comes back.
 
 ```js

@@ -20,7 +20,7 @@ same source with a flag baked in:
 
 | | import | size | contains |
 |---|---|---|---|
-| **Light** | `@arincen/charts` | ~24 KB | Six series types, crosshair, markers, price lines, primitives, pan and zoom |
+| **Light** | `@arincen/charts` | ~25 KB | Six series types, crosshair, markers, price lines, primitives, pan and zoom |
 | **Full** | `@arincen/charts/full` | ~33 KB | All of that, plus panes, logarithmic / percentage / indexed scales, left and overlay scales, custom series, watermarks, touch tracking, kinetic scroll |
 
 ```js

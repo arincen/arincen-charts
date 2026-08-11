@@ -114,6 +114,14 @@ export function createChart(container, options) {
         _internal: chart,
     };
 
+    // The loop the library is for — the chart says what it shows, something
+    // answers, the answer goes back on the chart — is in both builds, because
+    // a reader who installs the default one and pastes the first example in
+    // the README has to have it work. It is 1.2 KB of the light build's 25.
+    api.toText = (textOptions) => toText(chart, textOptions);
+    api.toImage = (imageOptions) => toImage(chart, imageOptions);
+    api.annotate = (notes, annotateOptions) => annotate(chart, notes, annotateOptions);
+
     // Panes are wired here rather than as methods on the chart. A minifier
     // never drops a class method, so a `panes()` method would hold the whole
     // pane module into the light bundle no matter how it was flagged; an
@@ -124,10 +132,7 @@ export function createChart(container, options) {
             seriesOptions,
             paneIndex,
         );
-        api.toImage = (imageOptions) => toImage(chart, imageOptions);
         api.toCSV = (csvOptions) => toCSV(chart, csvOptions);
-        api.toText = (textOptions) => toText(chart, textOptions);
-        api.annotate = (notes, annotateOptions) => annotate(chart, notes, annotateOptions);
         api.panes = () => paneApis(chart);
         api.addPane = (index) => addPane(chart, index);
         api.removePane = (index) => {
