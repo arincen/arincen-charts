@@ -227,8 +227,37 @@ pages.forEach((page) => {
                 },
             };
 
+            /**
+             * The same `ui` the docs component hands a snippet. Headless, but
+             * it has to exist and return elements: a demo that calls
+             * `ui.button` would otherwise pass here and throw on the page,
+             * which is the one failure this file exists to prevent.
+             */
+            const pressed = [];
+            const ui = {
+                button: (label, onClick) => {
+                    const element = document.createElement('button');
+
+                    element.textContent = label;
+                    pressed.push(onClick);
+
+                    return element;
+                },
+                options: (labels, onChoose) => ({
+                    choose: () => {},
+                    buttons: labels.map((label) => ui.button(label, () => onChoose(0))),
+                }),
+                readout: (text = '') => {
+                    const element = document.createElement('pre');
+
+                    element.textContent = text;
+
+                    return element;
+                },
+            };
+
             const run = new Function(
-                'chart', 'container', 'lib', 'data', 'onCleanup',
+                'chart', 'container', 'lib', 'data', 'onCleanup', 'ui',
                 ...Object.keys(scope),
                 `"use strict";\n${block.code}`,
             );
@@ -239,8 +268,14 @@ pages.forEach((page) => {
                 scope,
                 sampleData(),
                 (fn) => cleanups.push(fn),
+                ui,
                 ...Object.values(scope),
             );
+
+            // Every button, once. A handler that throws is a demo that looks
+            // fine until somebody presses it — which is exactly how the last
+            // three of these shipped broken.
+            pressed.forEach((press) => press());
 
             const readings = readingsDrawn(built);
             const marks = built.reduce((total, made) => total + drawCounting(made), 0);

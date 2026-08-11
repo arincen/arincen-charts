@@ -1,6 +1,6 @@
 # In a mobile app
 
-There is no Swift package and no Kotlin artifact. There is a 25 KB script that
+There is no Swift package and no Kotlin artifact. There is a 26 KB script that
 runs in a `WKWebView` or an Android `WebView`, which is what a native charting
 wrapper is underneath anyway — the wrapper is a native-language API over the
 same JavaScript.
@@ -79,7 +79,7 @@ One file, no build step, no network beyond your own data.
 
 **Ship the script and the page inside the app bundle**, not from your server.
 A chart that waits for a network round trip before drawing is a white rectangle
-for as long as the connection is bad, and the file is 25 KB.
+for as long as the connection is bad, and the file is 26 KB.
 
 ## iOS
 
@@ -172,7 +172,7 @@ first apostrophe in a symbol name and produces a syntax error nobody sees.
 | dark mode | `chart.applyOptions({ theme })` from native; do not reload the page |
 
 **Do not reload the page to change anything.** A reload is a blank frame, a
-lost zoom and a fresh 25 KB parse. Everything is a call: `applyOptions`,
+lost zoom and a fresh 26 KB parse. Everything is a call: `applyOptions`,
 `setData`, `update`.
 
 ## Caching, which will catch you

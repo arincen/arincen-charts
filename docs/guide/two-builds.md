@@ -20,8 +20,8 @@ same source with a flag baked in:
 
 | | import | size | contains |
 |---|---|---|---|
-| **Light** | `@arincen/charts` | ~25 KB | Six series types, crosshair, markers, price lines, primitives, pan and zoom |
-| **Full** | `@arincen/charts/full` | ~33 KB | All of that, plus panes, logarithmic / percentage / indexed scales, left and overlay scales, custom series, watermarks, touch tracking, kinetic scroll |
+| **Light** | `@arincen/charts` | ~26 KB | Six series types, crosshair, markers, price lines, primitives, pan and zoom |
+| **Full** | `@arincen/charts/full` | ~34 KB | All of that, plus panes, logarithmic / percentage / indexed scales, left and overlay scales, custom series, watermarks, touch tracking, kinetic scroll |
 
 ```js
 import { createChart } from '@arincen/charts';        // light
@@ -45,7 +45,7 @@ chart.addCustomSeries;  // undefined
 
 Searching the shipped light bundle for `priceScaleId`, `trackingMode` or
 `createTextWatermark` returns nothing. That is checked by the test suite, along
-with the size budget, which fails if the light bundle grows past 25 KB.
+with the size budget, which fails if the light bundle grows past 26 KB.
 
 ## Which should you use
 

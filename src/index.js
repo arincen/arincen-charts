@@ -5,7 +5,7 @@ import { customSeriesDefinition } from './custom-series.js';
 import { toImage, toCSV } from './export.js';
 import { toContext } from './context.js';
 import { toText } from './describe.js';
-import { annotate } from './annotate.js';
+import { annotate, clearAnnotations } from './annotate.js';
 
 export { LineStyle, LineType, PriceLineSource, CrosshairMode, PriceScaleMode } from './options.js';
 export { sparkline } from './sparkline.js';
@@ -123,6 +123,24 @@ export function createChart(container, options) {
     api.toImage = (imageOptions) => toImage(chart, imageOptions);
     api.annotate = (notes, annotateOptions) => annotate(chart, notes, annotateOptions);
     api.pointer = () => chart.crosshairState();
+
+    /**
+     * The chart as the reader found it.
+     *
+     * Anything that can drive a chart can leave it somewhere strange — scrolled
+     * off the data, covered in half-right annotations — and the reader is then
+     * stuck with it. One call takes it all back, which is cheaper than every
+     * caller keeping a record of what it did.
+     */
+    api.reset = () => {
+        clearAnnotations(chart);
+
+        // What `fitContent` does, rather than a call to it: the viewport
+        // methods all funnel through the time scale api, and this is the one
+        // place that wants the state and not the route to it.
+        chart.autoFit = true;
+        chart.scheduleRender();
+    };
 
     // Panes are wired here rather than as methods on the chart. A minifier
     // never drops a class method, so a `panes()` method would hold the whole

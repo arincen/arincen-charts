@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Arincen Charts
   text: The charting library an agent can read
-  tagline: Lighter, faster, smarter. 25 KB, zero dependencies, and the first charting engine that hands a model exactly what is on screen — then lets it draw the answer back. Your users ask; the agent reads the chart and answers on it.
+  tagline: Lighter, faster, smarter. 26 KB, zero dependencies, and the first charting engine that hands a model exactly what is on screen — then lets it draw the answer back. Your users ask; the agent reads the chart and answers on it.
   actions:
     - theme: brand
       text: Get started
@@ -18,7 +18,7 @@ features:
     details: chart.toText() hands a model exactly what is on screen, in words. chart.toImage() hands it the picture. No API key, no bundled model, no provider to be tied to.
   - title: And an agent can work it
     details: chart.annotate() draws the answer back as markers, levels and regions. setVisibleRange() looks closer. setCrosshairPosition() points. The verbs are ordinary API — an agent is just the first caller that needed all of them named together.
-  - title: 25 KB, and it is measured
+  - title: 26 KB, and it is measured
     details: A test gzips the shipped bundle and fails if any size written anywhere on this site is not the one it measured. That heading drifted four kilobytes before the test existed.
   - title: No dependencies
     details: Nothing to audit, update, or have a CVE filed against. The whole library is one file with no imports outside itself.

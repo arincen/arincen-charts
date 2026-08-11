@@ -37,7 +37,9 @@ agent is simply the first caller that needed all of it named in one place.
 
 | | |
 |---|---|
-| `chart.annotate(notes)` | markers, levels and regions from one shape |
+| `chart.annotate(notes)` | markers, levels, regions and trend lines from one shape |
+| `notes.remove(id)` | one of them off again, leaving the rest |
+| `chart.reset()` | the chart as the reader found it |
 | `chart.timeScale().setVisibleRange({ from, to })` | look at this period |
 | `chart.timeScale().fitContent()` | look at everything |
 | `chart.setCrosshairPosition(price, time, series)` | point at this |
@@ -65,13 +67,9 @@ chart.annotate(JSON.parse(answer));
 Press the button below. There is no model behind it — it marks the largest
 move it can find, which is what a real answer would look like coming back.
 
-<ChartDemo :height="420">
+<ChartDemo :height="300">
 
 ```js
-// The chart keeps the top; the description gets its own panel underneath
-// rather than being written over the axis it is describing.
-chart.applyOptions({ autoSize: false, width: container.offsetWidth, height: 300 });
-
 const series = chart.addSeries(CandlestickSeries, {
     upColor: '#22ab94',
     downColor: '#f23645',
@@ -87,25 +85,11 @@ const bars = data.slice(-90);
 series.setData(bars);
 chart.timeScale().fitContent();
 
-const readout = document.createElement('pre');
-
-readout.style.cssText = 'position:absolute;top:308px;left:0;right:0;bottom:0;z-index:3;margin:0;'
-    + 'overflow:auto;padding:10px 12px;border-top:1px solid rgba(127,127,127,0.25);'
-    + 'font:500 10px ui-monospace,monospace;white-space:pre-wrap;opacity:0.75';
-readout.textContent = chart.toText();
-container.appendChild(readout);
-
-const button = document.createElement('button');
-
-button.textContent = 'Annotate';
-button.style.cssText = 'position:absolute;top:10px;left:12px;z-index:3;font:600 12px system-ui;'
-    + 'padding:4px 12px;border-radius:999px;border:1px solid #db2777;color:#db2777;'
-    + 'background:transparent;cursor:pointer';
-container.appendChild(button);
+const readout = ui.readout(chart.toText());
 
 let notes = null;
 
-button.onclick = () => {
+ui.button('Annotate', () => {
     notes?.clear();
 
     // Stand-in for the model: the steepest ten-bar stretch, and the highest
@@ -129,7 +113,7 @@ button.onclick = () => {
     ]);
 
     readout.textContent = chart.toText();
-};
+});
 ```
 
 </ChartDemo>
@@ -185,11 +169,9 @@ says another, and April 2024 says a third. Drag the chart with **On screen**
 chosen and the sentence follows the view; choose any of the others and the view
 stays exactly where it is.
 
-<ChartDemo :height="440">
+<ChartDemo :height="300">
 
 ```js
-chart.applyOptions({ autoSize: false, width: container.offsetWidth, height: 250 });
-
 const series = chart.addSeries(CandlestickSeries, {
     upColor: '#22ab94',
     downColor: '#f23645',
@@ -212,18 +194,6 @@ series.setData(bars);
 // and "the whole series" are the same sentence, and a demo where two buttons
 // print the same thing teaches nothing.
 chart.timeScale().setVisibleLogicalRange({ from: bars.length - 45, to: bars.length - 1 });
-
-const readout = document.createElement('pre');
-
-readout.style.cssText = 'position:absolute;top:258px;left:0;right:0;bottom:0;z-index:3;margin:0;'
-    + 'overflow:auto;padding:38px 12px 10px;border-top:1px solid rgba(127,127,127,0.25);'
-    + 'font:500 10px ui-monospace,monospace;white-space:pre-wrap;opacity:0.85';
-container.appendChild(readout);
-
-const bar = document.createElement('div');
-
-bar.style.cssText = 'position:absolute;top:266px;left:12px;z-index:4;display:flex;gap:6px';
-container.appendChild(bar);
 
 const iso = (time) => (typeof time === 'string' ? time : new Date(time * 1000).toISOString().slice(0, 10));
 
@@ -259,26 +229,21 @@ const asked = [
     },
 ];
 
-let chosen = asked[0];
-const buttons = new Map();
+let chosen = 0;
 
-const render = () => {
-    for (const [question, element] of buttons) {
-        const active = question === chosen;
+const readout = ui.readout();
+const render = () => { readout.textContent = `${asked[chosen].call()}\n\n${asked[chosen].run()}`; };
 
-        element.style.background = active ? '#db2777' : 'transparent';
-        element.style.color = active ? '#fff' : '#db2777';
-    }
-
-    readout.textContent = `${chosen.call()}\n\n${chosen.run()}`;
-};
+const choices = ui.options(asked.map((question) => question.label), (index) => {
+    chosen = index;
+    render();
+});
 
 /**
  * Choosing the period on the chart itself, which is how a reader actually asks
  * about one: they point at the stretch they mean. The first click opens it, the
  * second closes it and shades it, and a third starts again.
  */
-const choosing = asked[asked.length - 1];
 let shaded = null;
 
 const onClick = (param) => {
@@ -296,27 +261,13 @@ const onClick = (param) => {
         shaded = chart.annotate([{ from: picked.from, to: picked.to, text: 'the period you chose' }]);
     }
 
-    chosen = choosing;
+    chosen = asked.length - 1;
+    choices.choose(chosen);
     render();
 };
 
 chart.subscribeClick(onClick);
 onCleanup(() => chart.unsubscribeClick(onClick));
-
-for (const question of asked) {
-    const element = document.createElement('button');
-
-    element.textContent = question.label;
-    element.style.cssText = 'font:600 11px system-ui;padding:3px 10px;border-radius:999px;'
-        + 'border:1px solid #db2777;cursor:pointer';
-    element.onclick = () => {
-        chosen = question;
-        render();
-    };
-
-    buttons.set(question, element);
-    bar.appendChild(element);
-}
 
 render();
 chart.timeScale().subscribeVisibleLogicalRangeChange(render);
@@ -369,21 +320,14 @@ Times come back in the form your data used — these readings carry unix seconds
 so that is what you see. `toText` formats dates for reading; this hands back what
 you gave it, so it can go straight into `annotate` or `setVisibleRange`.
 
-<ChartDemo :height="440">
+<ChartDemo :height="300">
 
 ```js
-chart.applyOptions({ autoSize: false, width: container.offsetWidth, height: 200 });
-
 chart.addSeries(LineSeries, { color: '#db2777', lineWidth: 2, title: 'ARN' })
     .setData(data.slice(-60));
 chart.timeScale().fitContent();
 
-const readout = document.createElement('pre');
-
-readout.style.cssText = 'position:absolute;top:208px;left:0;right:0;bottom:0;z-index:3;margin:0;'
-    + 'overflow:auto;padding:10px 12px;border-top:1px solid rgba(127,127,127,0.25);'
-    + 'font:500 10px ui-monospace,monospace;white-space:pre-wrap;opacity:0.8';
-container.appendChild(readout);
+const readout = ui.readout();
 
 // The whole object, on every change, so nothing is hidden behind a summary of
 // it. A window is what this call is about — if it did not follow the view
@@ -401,16 +345,22 @@ onCleanup(() => clearInterval(timer));
 
 ```js
 const notes = chart.annotate([
-    { time, price, text },   // a point       -> a marker
-    { price, text },         // a level       -> a price line
-    { from, to, text },      // a region      -> a shaded band
-], { series });              // whose series; the first with data by default
+    { time, price, text },                                 // a point   -> a marker
+    { price, text },                                       // a level   -> a price line
+    { from, to, text },                                    // a region  -> a shaded band
+    { from: { time, price }, to: { time, price }, text },   // a trend line
+], { series });                                            // whose series; the first with data by default
 
 notes.clear();
 ```
 
 One shape in, whatever it means. Doing this by hand means knowing that those
-three land on three unrelated APIs, one of which you have to write yourself.
+four land on four unrelated APIs, two of which you have to write yourself.
+
+**A trend line is two ends that carry a price.** *"From this low to that low"*
+is a line; *"from March to April"* is a stretch of time. The same two words
+mean both, and which one you get is decided by whether the ends know a price —
+so nothing has to be named or switched on.
 
 | | |
 |---|---|
@@ -418,6 +368,107 @@ three land on three unrelated APIs, one of which you have to write yourself.
 | a reversed `from`/`to` | drawn the same either way — a model returns them in either order |
 | a note with neither `price` nor a range | ignored, rather than guessed at |
 | markers you drew yourself | untouched; `annotate` appends, and `clear()` takes back only its own |
+| a label that would run off the edge | moved left until it fits, rather than clipped mid-word |
+
+### Taking one back
+
+```js
+const notes = chart.annotate([
+    { id: 'resistance', price: 148, text: 'resistance' },
+    { time, price, text: 'breakout' },
+]);
+
+notes.remove('resistance');   // true; the breakout marker stays
+notes.ids;                    // ['resistance', 'note-2']
+```
+
+*"No, drop the resistance line"* is an ordinary second sentence, and clearing
+everything to redraw all but one of them is not an answer to it. Notes carry
+the `id` you gave them, or one the chart gives them.
+
+And when a conversation has left the chart somewhere strange:
+
+```js
+chart.reset();
+```
+
+Every annotation from every call comes off — no need to have kept each handle —
+and the view refits. Markers the page drew itself are left alone, because they
+were never `annotate`'s to remove.
+
+### What a model actually sends
+
+The shapes above are what you would write. These are what comes back at three in
+the morning, and all of them are read rather than refused:
+
+| | |
+|---|---|
+| ` ```json … ``` ` | the fence is stripped and the JSON parsed |
+| one object, not an array | wrapped |
+| `{ notes: [...] }` | unwrapped — it is what the tool's own parameter was called |
+| `label`, `title`, `name` | read as `text` |
+| `value`, `level` | read as `price` |
+| `start`, `end` | read as `from`, `to` |
+| `"142.56"` | read as a number |
+| a sentence that is not JSON | nothing is drawn, and it says so |
+
+Each repair is reported once, with a tally, through the same `onError` channel
+as everything else — repaired quietly is how a prompt stays broken for a month.
+
+<ChartDemo :height="300">
+
+```js
+
+const series = chart.addSeries(CandlestickSeries, {
+    upColor: '#22ab94',
+    downColor: '#f23645',
+    borderUpColor: '#22ab94',
+    borderDownColor: '#f23645',
+    wickUpColor: '#22ab94',
+    wickDownColor: '#f23645',
+    title: 'ARN',
+});
+
+const bars = data.slice(-70);
+
+series.setData(bars);
+chart.timeScale().fitContent();
+
+const lowest = (from, to) => bars.slice(from, to).reduce((least, bar) => (bar.low < least.low ? bar : least), bars[from]);
+const high = bars.reduce((most, bar) => (bar.high > most.high ? bar : most), bars[0]);
+
+// Two lows to run a line between, which is what a support line is. One point
+// and a guess is not a trend line.
+const first = lowest(0, 20);
+const second = lowest(25, 50);
+
+let notes = null;
+
+// One answer, in all four shapes. Each gets its own colour, because four notes
+// in one pink are a decoration rather than four separate things somebody said.
+ui.button('Draw the answer', () => {
+    notes?.clear();
+    notes = chart.annotate([
+        {
+            from: { time: first.time, price: first.low },
+            to: { time: second.time, price: second.low },
+            text: 'support',
+            color: '#22ab94',
+        },
+        { id: 'resistance', price: high.high, text: 'resistance', color: '#f23645' },
+        { time: high.time, price: high.high, text: 'high', color: '#8b5cf6' },
+        { from: first.time, to: second.time, text: 'the base', color: '#0ea5e9' },
+    ]);
+});
+
+ui.button('Remove the resistance', () => notes?.remove('resistance'));
+ui.button('Reset the chart', () => {
+    chart.reset();
+    notes = null;
+});
+```
+
+</ChartDemo>
 
 **Nothing here interprets anything.** It is a drawing call whose input happens
 to be easy for a model to produce.
@@ -456,22 +507,15 @@ a timer asks `chart.pointer()` five times a second and prints whatever comes
 back, which is exactly the shape of an agent asking after the fact. Move the
 pointer away and it answers `null`, because nobody is pointing at anything.
 
-<ChartDemo :height="360">
+<ChartDemo :height="300">
 
 ```js
-chart.applyOptions({ autoSize: false, width: container.offsetWidth, height: 260 });
-
 const series = chart.addSeries(LineSeries, { color: '#db2777', lineWidth: 2, title: 'ARN' });
 
 series.setData(data.slice(-60));
 chart.timeScale().fitContent();
 
-const readout = document.createElement('pre');
-
-readout.style.cssText = 'position:absolute;top:268px;left:0;right:0;bottom:0;z-index:3;margin:0;'
-    + 'padding:10px 12px;border-top:1px solid rgba(127,127,127,0.25);'
-    + 'font:500 11px ui-monospace,monospace;opacity:0.8';
-container.appendChild(readout);
+const readout = ui.readout();
 
 // No handler is registered. This asks the question, which is the difference
 // between `pointer()` and `subscribeCrosshairMove` — and the reason a caller

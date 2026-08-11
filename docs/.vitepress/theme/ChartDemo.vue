@@ -29,6 +29,8 @@ const props = defineProps({
 const { isDark } = useData();
 const container = ref(null);
 const root = ref(null);
+const buttons = ref(null);
+const panel = ref(null);
 const revealed = ref(false);
 const failure = ref('');
 const chart = shallowRef(null);
@@ -137,7 +139,7 @@ async function build() {
         // that outlives the page it was started on is a leak the reader would
         // inherit by copying the snippet.
         const run = new Function(
-            'chart', 'container', 'lib', 'data', 'onCleanup',
+            'chart', 'container', 'lib', 'data', 'onCleanup', 'ui',
             ...Object.keys(library),
             `"use strict";\n${source}`,
         );
@@ -148,11 +150,69 @@ async function build() {
             library,
             makeData(props.dataset),
             (fn) => cleanups.push(fn),
+            controls(),
             ...Object.values(library),
         );
     } catch (error) {
         failure.value = error instanceof Error ? error.message : String(error);
     }
+}
+
+/**
+ * The controls a demo puts under its chart.
+ *
+ * Every example that needed a button used to draw its own, absolutely
+ * positioned over the chart at a hand-picked offset — which is how one ended up
+ * sitting on a region's label, and how three demos ended up with three
+ * different buttons. They belong to the demo frame, in a row beneath the chart,
+ * styled once.
+ */
+function controls() {
+    const button = (label, onClick) => {
+        const element = document.createElement('button');
+
+        element.type = 'button';
+        element.className = 'chart-demo__button';
+        element.textContent = label;
+        element.addEventListener('click', onClick);
+        buttons.value?.appendChild(element);
+
+        return element;
+    };
+
+    return {
+        button,
+
+        /**
+         * A row of buttons where one is chosen. `choose(index)` moves the
+         * highlight, so a demo does not have to reimplement which is active.
+         */
+        options: (labels, onChoose) => {
+            const made = labels.map((label, index) => button(label, () => {
+                choose(index);
+                onChoose(index);
+            }));
+
+            const choose = (index) => made.forEach((element, at) => {
+                element.dataset.active = String(at === index);
+            });
+
+            choose(0);
+
+            return { choose, buttons: made };
+        },
+
+        /** A monospaced panel under the chart for whatever the demo prints. */
+        readout: (text = '') => {
+            const element = document.createElement('pre');
+
+            element.className = 'chart-demo__readout';
+            element.textContent = text;
+            panel.value?.appendChild(element);
+
+            return element;
+        },
+    };
 }
 
 function teardown() {
@@ -180,6 +240,8 @@ function teardown() {
     // behind by `chart.remove()`, which only owns what it made. Without this a
     // theme toggle leaves the previous run's controls stacked on the new one.
     container.value?.replaceChildren();
+    buttons.value?.replaceChildren();
+    panel.value?.replaceChildren();
 }
 
 onMounted(build);
@@ -190,6 +252,9 @@ watch(isDark, build);
 <template>
     <div ref="root" class="chart-demo">
         <div ref="container" class="chart-demo__chart" :style="{ height: `${height}px` }" />
+
+        <div ref="buttons" class="chart-demo__controls" />
+        <div ref="panel" class="chart-demo__panel" />
 
         <p v-if="failure" class="chart-demo__failure">
             This example failed to run: {{ failure }}
@@ -221,6 +286,65 @@ watch(isDark, build);
     border: 1px solid var(--vp-c-divider);
     border-radius: 10px;
     overflow: hidden;
+}
+
+/*
+    The controls and the readout belong to the frame, not to the snippet. A
+    demo that draws its own button picks its own colour and its own corner
+    radius, and four demos then disagree with each other on the same page.
+*/
+.chart-demo__controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px;
+    border-top: 1px solid var(--vp-c-divider);
+}
+
+.chart-demo__controls:empty,
+.chart-demo__panel:empty {
+    display: none;
+}
+
+/*
+    `:deep`, because a snippet's buttons are created at runtime and a scoped
+    rule only ever matches what this template rendered. Without it they arrive
+    as unstyled text — which is exactly how they first shipped.
+*/
+.chart-demo :deep(.chart-demo__button) {
+    padding: 6px 12px;
+    border: 1px solid var(--vp-c-divider);
+    border-radius: 8px;
+    background: var(--vp-c-bg);
+    color: var(--vp-c-text-1);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.chart-demo :deep(.chart-demo__button:hover) {
+    border-color: var(--vp-c-brand-1);
+    color: var(--vp-c-brand-1);
+}
+
+.chart-demo :deep(.chart-demo__button[data-active='true']) {
+    border-color: var(--vp-c-brand-1);
+    background: var(--vp-c-brand-1);
+    color: var(--vp-c-bg);
+}
+
+.chart-demo :deep(.chart-demo__readout) {
+    margin: 0;
+    padding: 12px;
+    border-top: 1px solid var(--vp-c-divider);
+    overflow-x: auto;
+    color: var(--vp-c-text-2);
+    font-family: var(--vp-font-family-mono);
+    font-size: 11px;
+    line-height: 1.6;
+    white-space: pre-wrap;
 }
 
 .chart-demo__chart {
