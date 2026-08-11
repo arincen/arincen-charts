@@ -75,6 +75,18 @@ bar is normal in a live feed. If a marker is missing, check its `time` against
 the data before checking anything else.
 :::
 
+### Why markers stay legible
+
+Every marker is outlined in the chart's own background colour before it is
+filled. A marker sits on top of the very bars it is pointing at, and a red
+arrow over a red candle is a shape nobody can find — the ring gives it an edge
+against whatever is behind it, in any theme, without a second colour to
+configure.
+
+Nothing to switch on, and nothing to switch off. On a chart with a transparent
+background there is nothing to outline *with*, so it is skipped rather than
+guessed at: a white ring would be wrong on somebody's dark page.
+
 `series.setMarkers(…)` exists as well and does the same thing. Prefer
 `createSeriesMarkers` — the handle it hands back is what you need when the
 markers have to change, and reaching back through the series to replace them

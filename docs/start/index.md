@@ -1,7 +1,7 @@
 # Install
 
 Arincen Charts draws financial charts on a canvas. It has no dependencies, it
-is about twenty kilobytes gzipped, and it does not need a build step unless
+is about twenty-two kilobytes gzipped, and it does not need a build step unless
 you already have one.
 
 This is it, running here. Drag it, scroll to zoom, hover for the crosshair —

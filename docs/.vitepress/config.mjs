@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
  * links in other people's writing, which is the one kind of link you cannot go
  * back and fix.
  *
- * Sizes are written as "about twenty kilobytes" in prose and never as a
+ * Sizes are written as "about twenty-two kilobytes" in prose and never as a
  * precise figure. The precise figure belongs on the landing page, which reads
  * it from the shipped file at request time; a number typed into a markdown file
  * is a number that starts drifting the day after it is typed, and the first
@@ -46,7 +46,7 @@ export default defineConfig({
     outDir: '.vitepress/dist/charts',
     lang: 'en-US',
     title: 'Arincen Charts',
-    description: 'A financial chart in about 20 KB, with zero dependencies.',
+    description: 'A financial chart an AI agent can read: about 22 KB, zero dependencies.',
     cleanUrls: true,
     lastUpdated: true,
 
@@ -107,6 +107,8 @@ export default defineConfig({
                 items: [
                     { text: 'React', link: '/frameworks/react' },
                     { text: 'Vue', link: '/frameworks/vue' },
+                    { text: 'Svelte', link: '/frameworks/svelte' },
+                    { text: 'In a mobile app', link: '/frameworks/mobile' },
                     { text: 'No build step', link: '/frameworks/script-tag' },
                 ],
             },
@@ -129,6 +131,8 @@ export default defineConfig({
                     { text: 'Load history on scroll', link: '/recipes/infinite-history' },
                     { text: 'A live streaming chart', link: '/recipes/streaming' },
                     { text: 'A sparkline', link: '/recipes/sparkline' },
+                    { text: 'Downloading the chart', link: '/recipes/export' },
+                    { text: 'A chart an agent can read', link: '/recipes/ai' },
                 ],
             },
             {

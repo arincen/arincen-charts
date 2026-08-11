@@ -234,7 +234,7 @@ chart.remove();
 Removes the canvases, unsubscribes the listeners, and tells any custom series
 and plugins to release what they were holding. In a single-page application,
 call it when the component goes away — the [React](/frameworks/react) and
-[Vue](/frameworks/vue) guides show where.
+[Vue](/frameworks/vue) and [Svelte](/frameworks/svelte) guides show where.
 
 ## What next
 

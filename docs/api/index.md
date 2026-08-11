@@ -199,7 +199,7 @@ The full build adds:
 ```js
 import {
     LastPriceAnimationMode, FULL_BUILD,
-    createTooltip,
+    createTooltip, prefersReducedMotion,
     createTextWatermark, createImageWatermark, createUpDownMarkers,
 } from '@arincen/charts/full';
 ```
@@ -209,6 +209,7 @@ import {
 | `createTooltip(chart, options?)` | [a tooltip that follows the crosshair](/guide/interaction#a-tooltip-without-writing-one) |
 | `createTextWatermark(options)` / `createImageWatermark(url, options)` | [watermarks](/guide/watermarks) |
 | `createUpDownMarkers(options)` | [up/down markers](/guide/watermarks#up-down-markers) |
+| `prefersReducedMotion()` | [whether the reader has asked for less movement](/guide/interaction#movement-nobody-asked-for) |
 
 `FULL_BUILD` is a boolean you can branch on when a component must work under
 either build.

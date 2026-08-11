@@ -1,4 +1,5 @@
 import { commonDefaults } from './series.js';
+import { report } from './errors.js';
 
 /**
  * Turns a caller's pane view into a series definition the chart can draw.
@@ -78,9 +79,10 @@ export function customSeriesDefinition(paneView) {
 
             try {
                 paneView.renderer()?.draw?.(target, priceToCoordinate, false);
-            } catch {
+            } catch (error) {
                 // A broken view loses its own drawing, not the chart — the same
                 // bargain primitives get.
+                report(series.chart, error, 'customSeries.draw');
             }
         },
     };

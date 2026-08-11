@@ -84,8 +84,8 @@ Honestly, so you find out here rather than mid-migration:
 
 | | |
 |---|---|
-| `@arincen/charts` | ~20 KB gzipped |
-| `@arincen/charts/full` | ~26 KB gzipped |
+| `@arincen/charts` | ~22 KB gzipped |
+| `@arincen/charts/full` | ~31 KB gzipped |
 | lightweight-charts v5.2 | ~60 KB gzipped |
 
 All three measured the same way — gzip level 9 over the standalone build each

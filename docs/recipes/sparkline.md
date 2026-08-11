@@ -3,6 +3,69 @@
 The smallest useful chart: no axes, no grid, no crosshair, no interaction. A
 shape in a table cell.
 
+```js
+import { sparkline } from '@arincen/charts';
+
+const spark = sparkline(cell, values);
+```
+
+That is the whole thing. It draws green if the series ended higher than it
+started and red if it did not, fills under the line, fits the readings to the
+width, and switches off everything a chart this size has no room for.
+
+<ChartDemo :height="90" chart-only>
+
+```js
+const values = data.slice(-60).map((bar) => ({ time: bar.time, value: bar.value }));
+
+// `sparkline` builds its own chart, so the one this page made is let go of
+// first — two charts in one box would stack, not overlap.
+chart.remove();
+
+sparkline(container, values);
+```
+
+</ChartDemo>
+
+```js
+sparkline(cell, values, {
+    color: '#db2777',   // omitted: green if it ended higher, red if it did not
+    type: 'line',       // 'area' by default, which fills under the line
+    lineWidth: 2,
+    width: 120,         // omitted: follows the container
+    height: 30,
+});
+```
+
+The handle it returns is for the live case — a table of thirty rows, each
+repainting on a tick:
+
+```js
+const spark = sparkline(cell, values);
+
+spark.setData(next);   // re-reads the direction, so the colour follows it
+spark.remove();
+spark.chart;           // the chart underneath, if you must
+spark.series;
+```
+
+**`setData` is the whole update path.** There is no `update` on a sparkline: at
+this size the difference between appending one reading and replacing sixty is
+not worth an API, and the colour has to be reconsidered either way.
+
+**Interaction cannot be turned back on.** A 60×20 chart that accepts a drag
+gets dragged by accident on every scroll of the table it lives in, and the
+reader has no axis, no scrollbar and no way to put it back. If you want
+something draggable, you want a chart.
+
+**It says nothing about its data.** [Validation](/api/chart-options#when-the-data-is-wrong)
+is off: thirty cells each warning about the same feed is not how anybody finds
+out, and a table cell is not where you go looking.
+
+## The long way
+
+What the one call is doing, in case you want to do it differently:
+
 <ChartDemo :height="90" chart-only>
 
 ```js
@@ -79,20 +142,16 @@ between red and green on a chart whose whole point is the trend.
 ```
 
 ```js
-const charts = [];
+const sparks = [];
 
 document.querySelectorAll('.spark').forEach((element) => {
-    const chart = createChart(element, sparklineOptions);
-
-    chart.addSeries(AreaSeries, sparklineSeries).setData(seriesFor(element.dataset.symbol));
-    chart.timeScale().fitContent();
-    charts.push(chart);
+    sparks.push(sparkline(element, seriesFor(element.dataset.symbol)));
 });
 
 // Whenever the table is replaced — a sort, a filter, a page change.
 function teardown() {
-    charts.forEach((chart) => chart.remove());
-    charts.length = 0;
+    sparks.forEach((spark) => spark.remove());
+    sparks.length = 0;
 }
 ```
 
@@ -107,7 +166,7 @@ page gets slower the longer you use it".
 ## Fixed size instead of `autoSize`
 
 ```js
-const chart = createChart(element, { width: 120, height: 32, ...sparklineOptions });
+sparkline(element, values, { width: 120, height: 32 });
 ```
 
 In a dense table this is worth doing: `autoSize` attaches a `ResizeObserver` per

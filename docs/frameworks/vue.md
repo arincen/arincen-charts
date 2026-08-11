@@ -199,5 +199,6 @@ const series = shallowRef<SeriesApi | null>(null);
 ## What next
 
 - [React](/frameworks/react)
+- [Svelte](/frameworks/svelte)
 - [No build step](/frameworks/script-tag) — a script tag and nothing else
 - [Live data](/start/live-data)

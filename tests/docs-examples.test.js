@@ -213,6 +213,18 @@ pages.forEach((page) => {
 
                     return made;
                 },
+
+                // A preset builds its chart with the `createChart` it imported
+                // itself, not the one above, so the chart it draws into is
+                // invisible here — the recipe read as "ran but drew nothing"
+                // while being perfectly correct.
+                sparkline: (...args) => {
+                    const made = library.sparkline(...args);
+
+                    built.push(made.chart);
+
+                    return made;
+                },
             };
 
             const run = new Function(

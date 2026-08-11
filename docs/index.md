@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: Arincen Charts
-  text: Financial charts in 20 KB
-  tagline: A canvas charting engine with zero dependencies, in two builds — one that carries everything, and one that has the rest compiled out.
+  text: Financial charts an AI agent can read
+  tagline: 22 KB, zero dependencies, and the first charting engine that hands a model exactly what is on screen — then draws its answer back onto the chart.
   actions:
     - theme: brand
       text: Get started
@@ -14,10 +14,12 @@ hero:
       link: https://github.com/arincen/arincen-charts
 
 features:
-  - title: 20 KB, and it is measured
+  - title: An agent can read it
+    details: chart.toText() hands a model exactly what is on screen, in words. chart.toImage() hands it the picture. chart.annotate() draws the answer back. No API key, no bundled model, no provider to be tied to.
+  - title: 22 KB, and it is measured
     details: A test gzips the shipped bundle and fails if any size written anywhere on this site is not the one it measured. That heading drifted four kilobytes before the test existed.
   - title: No dependencies
-    details: Nothing in `dependencies` to audit, update, or have a CVE filed against. The whole library is one file with no imports outside itself.
+    details: Nothing to audit, update, or have a CVE filed against. The whole library is one file with no imports outside itself.
   - title: Two builds, one codebase
     details: Panes, non-linear price scales and custom series are compiled out of the light build entirely. Not tree-shaken and hopefully removed — absent.
   - title: Extensible without forking
@@ -58,6 +60,44 @@ const chart = createChart(document.getElementById('chart'), { autoSize: true });
 ```
 
 Note the third and fourth readings — the 5th follows the 2nd. The weekend is not drawn as empty space, because bars are placed by their position in the data and never by elapsed time. That is the right default for market data and the wrong one for a sensor log.
+
+## A chart an agent can read
+
+Every charting library draws for eyes. Anything else — a language model, a
+screen reader, an alerting job — has to reach into series internals and write
+the same summary again, badly, in every project.
+
+```js
+chart.toText();
+```
+
+```
+A chart of 2 series over 180 readings, 2024-01-01 to 2024-06-28.
+Showing 2024-04-01 to 2024-06-28, 89 of them.
+AAPL (candlestick): last 142.56, high 150.10 on 2024-06-20, low 98.20 on 2024-04-03, up 12.42% over the period.
+```
+
+Deterministic, short enough to paste into a prompt, and free of judgement —
+no "bullish", no "resistance". A test fails the build if those words appear,
+because a conclusion about somebody else's money is theirs to draw.
+
+The answer comes back the same way. One shape, whatever it means: a point
+becomes a marker, a level a price line, a region a shaded band.
+
+```js
+chart.annotate([
+    { from, to, text },      // "steepest run"
+    { time, price, text },   // "high"
+    { price, text },         // "peak close"
+]);
+```
+
+**There is no model in here, and there never will be.** No API key, no client
+library, no provider you are tied to. What was missing everywhere else is the
+boring half — getting the numbers *out* in a form something can reason about,
+and getting an answer *back* onto the canvas.
+
+[The whole loop, with a chart you can press](/recipes/ai).
 
 ## Why another charting library
 

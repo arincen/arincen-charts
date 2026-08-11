@@ -1,6 +1,8 @@
+import { container } from './support/headless-dom.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { magnetPrice } from '../src/chart.js';
+import { createChart, LineSeries } from '../src/index.js';
 
 /** The price alone: the helper reports the scale it came from as well. */
 const snappedPrice = (...args) => magnetPrice(...args)?.price ?? null;
@@ -135,4 +137,80 @@ test('a series on its own scale is measured through that scale', () => {
 
 test('an empty pane leaves the pointer alone', () => {
     assert.equal(snappedPrice(paneWith(), 0, 480, CrosshairMode.Magnet), null);
+});
+
+/* ------------------------------------------------- placing it from your code */
+
+/**
+ * `setCrosshairPosition` moves the crosshair and tells nobody.
+ *
+ * That is deliberate — the first thing anyone builds with it is two charts
+ * subscribed to each other, and emitting would have them calling each other
+ * for ever — but it is surprising enough that the docs carry a warning, and a
+ * warning with no test behind it is a comment. Someone "fixing" the missing
+ * event would hang every synchronised-chart page on the site.
+ */
+const day = 24 * 60 * 60;
+const start = Math.floor(Date.UTC(2024, 0, 1) / 1000);
+
+function placed() {
+    const chart = createChart(container(), { width: 800, height: 300 });
+    const series = chart.addSeries(LineSeries, {});
+    const values = Array.from({ length: 60 }, (_, index) => ({
+        time: start + index * day,
+        value: 100 + index,
+    }));
+
+    series.setData(values);
+    chart.timeScale().fitContent();
+
+    let fired = 0;
+
+    chart.subscribeCrosshairMove(() => { fired++; });
+
+    return { chart, series, values, fired: () => fired };
+}
+
+test('placing the crosshair yourself does not fire crosshair handlers', () => {
+    const { chart, series, values, fired } = placed();
+
+    chart.setCrosshairPosition(values[20].value, values[20].time, series);
+
+    assert.equal(fired(), 0, 'a programmatic placement emitted an event, which loops a synced pair');
+
+    chart.remove();
+});
+
+test('nor does clearing it', () => {
+    const { chart, series, values, fired } = placed();
+
+    chart.setCrosshairPosition(values[20].value, values[20].time, series);
+    chart.clearCrosshairPosition();
+
+    assert.equal(fired(), 0, 'clearing emitted an event the placement did not');
+
+    chart.remove();
+});
+
+test('but it does move the crosshair, and to the bar asked for', () => {
+    const { chart, series, values } = placed();
+
+    // The pair above would both pass on a build where the call did nothing at
+    // all, which is what a reader reports as "I moved the slider and nothing
+    // happened".
+    const at = (index) => {
+        chart.setCrosshairPosition(values[index].value, values[index].time, series);
+
+        return chart._internal.crosshair;
+    };
+
+    const early = at(10);
+    const late = at(50);
+
+    assert.equal(early.index, 10);
+    assert.equal(late.index, 50);
+    assert.ok(late.x > early.x, 'the crosshair did not move along the plot');
+    assert.ok(late.y < early.y, 'the crosshair did not follow the price up');
+
+    chart.remove();
 });

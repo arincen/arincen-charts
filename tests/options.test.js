@@ -107,3 +107,85 @@ test('scroll direction is preserved', () => {
     // equality accepts, but which Object.is — and so assert.equal — does not.
     assert.ok(wheelZoomStep({ deltaY: 0, deltaMode: 0 }) === 0);
 });
+
+/* ---------------------------------------------------------------- autoSize */
+
+/**
+ * `autoSize` could be switched on and never off.
+ *
+ * Only the starting half was wired, so the observer went on resizing the chart
+ * back to its container: a later `width`/`height` applied, then came undone on
+ * the next frame. Found by writing a documentation demo that wanted a chart
+ * smaller than the box it sits in, which read as `applyOptions` ignoring a
+ * size rather than as an option that only travels one way.
+ */
+/**
+ * The headless DOM has no `ResizeObserver`, and `startAutoSize` quietly does
+ * nothing without one — so a test written without this stub asserts against a
+ * chart that was never auto-sizing in the first place.
+ */
+function withResizeObserver(run) {
+    const previous = globalThis.ResizeObserver;
+
+    globalThis.ResizeObserver = class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+    };
+
+    try {
+        return run();
+    } finally {
+        if (previous) {
+            globalThis.ResizeObserver = previous;
+        } else {
+            delete globalThis.ResizeObserver;
+        }
+    }
+}
+
+test('autoSize can be turned off again', async () => {
+    const { container } = await import('./support/headless-dom.js');
+    const { createChart } = await import('../src/index.js');
+
+    const chart = withResizeObserver(
+        () => createChart(container(), { autoSize: true, width: 600, height: 300 }),
+    );
+
+    assert.ok(chart._internal.resizeObserver, 'auto-sizing never started');
+
+    chart.applyOptions({ autoSize: false });
+
+    assert.equal(chart._internal.resizeObserver, null, 'the chart is still watching its container');
+
+    chart.remove();
+});
+
+test('and a size set afterwards is the size it keeps', async () => {
+    const { container } = await import('./support/headless-dom.js');
+    const { createChart } = await import('../src/index.js');
+
+    const chart = createChart(container(), { autoSize: true, width: 600, height: 400 });
+
+    chart.applyOptions({ autoSize: false, width: 600, height: 240 });
+
+    assert.equal(chart._internal.height, 240);
+
+    chart.remove();
+});
+
+test('turning it back on resumes watching', async () => {
+    const { container } = await import('./support/headless-dom.js');
+    const { createChart } = await import('../src/index.js');
+
+    const chart = withResizeObserver(
+        () => createChart(container(), { autoSize: true, width: 600, height: 300 }),
+    );
+
+    chart.applyOptions({ autoSize: false });
+    withResizeObserver(() => chart.applyOptions({ autoSize: true }));
+
+    assert.ok(chart._internal.resizeObserver, 'it could be turned off but not back on');
+
+    chart.remove();
+});

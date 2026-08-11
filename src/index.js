@@ -2,8 +2,12 @@ import { Chart } from './chart.js';
 import { FULL_BUILD } from './flags.js';
 import { paneApis, addPane, removePane, movePane, scaleRecord } from './panes.js';
 import { customSeriesDefinition } from './custom-series.js';
+import { toImage, toCSV } from './export.js';
+import { toText } from './describe.js';
+import { annotate } from './annotate.js';
 
 export { LineStyle, LineType, PriceLineSource, CrosshairMode, PriceScaleMode } from './options.js';
+export { sparkline } from './sparkline.js';
 export {
     LineSeries,
     AreaSeries,
@@ -120,6 +124,10 @@ export function createChart(container, options) {
             seriesOptions,
             paneIndex,
         );
+        api.toImage = (imageOptions) => toImage(chart, imageOptions);
+        api.toCSV = (csvOptions) => toCSV(chart, csvOptions);
+        api.toText = (textOptions) => toText(chart, textOptions);
+        api.annotate = (notes, annotateOptions) => annotate(chart, notes, annotateOptions);
         api.panes = () => paneApis(chart);
         api.addPane = (index) => addPane(chart, index);
         api.removePane = (index) => {
@@ -155,3 +163,42 @@ export function createSeriesMarkers(series, markers) {
         detach: () => series.setMarkers([]),
     };
 }
+
+/**
+ * The public types, re-exported from the entry point.
+ *
+ * They live in `types.js` as JSDoc, and a `.d.ts` generated from this file
+ * carried none of them: `import type { ChartApi } from '@arincen/charts'` —
+ * which the React, Vue and API pages all tell people to write — did not
+ * compile, and nothing noticed, because the type test imported a dist path
+ * and only ever imported values.
+ *
+ * @typedef {import('./types.js').ChartApi} ChartApi
+ * @typedef {import('./types.js').SeriesApi} SeriesApi
+ * @typedef {import('./types.js').PaneApi} PaneApi
+ * @typedef {import('./types.js').TimeScaleApi} TimeScaleApi
+ * @typedef {import('./types.js').PriceScaleApi} PriceScaleApi
+ * @typedef {import('./types.js').PriceLineApi} PriceLineApi
+ * @typedef {import('./types.js').ChartOptions} ChartOptions
+ * @typedef {import('./types.js').SeriesOptionsCommon} SeriesOptionsCommon
+ * @typedef {import('./types.js').PriceLineOptions} PriceLineOptions
+ * @typedef {import('./types.js').SeriesMarker} SeriesMarker
+ * @typedef {import('./types.js').MouseEventParams} MouseEventParams
+ * @typedef {import('./types.js').LayoutOptions} LayoutOptions
+ * @typedef {import('./types.js').LocalizationOptions} LocalizationOptions
+ * @typedef {import('./types.js').GridOptions} GridOptions
+ * @typedef {import('./types.js').CrosshairOptions} CrosshairOptions
+ * @typedef {import('./types.js').PriceScaleOptions} PriceScaleOptions
+ * @typedef {import('./types.js').TimeScaleOptions} TimeScaleOptions
+ * @typedef {import('./types.js').HandleScrollOptions} HandleScrollOptions
+ * @typedef {import('./types.js').HandleScaleOptions} HandleScaleOptions
+ * @typedef {import('./types.js').Point} Point
+ * @typedef {import('./types.js').Whitespace} Whitespace
+ * @typedef {import('./types.js').Primitive} Primitive
+ * @typedef {import('./types.js').PrimitivePaneView} PrimitivePaneView
+ * @typedef {import('./types.js').PrimitiveRenderer} PrimitiveRenderer
+ * @typedef {import('./types.js').PrimitiveAxisView} PrimitiveAxisView
+ * @typedef {import('./types.js').CustomSeriesPaneView} CustomSeriesPaneView
+ * @typedef {import('./types.js').RenderTarget} RenderTarget
+ * @typedef {import('./types.js').BarsInfo} BarsInfo
+ */

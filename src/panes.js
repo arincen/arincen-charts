@@ -1,5 +1,6 @@
 import { PriceScale } from './scales.js';
 import { mergeOptions } from './options.js';
+import { report } from './errors.js';
 
 /**
  * A pane is one plotting area with its own price scale, series and vertical
@@ -121,6 +122,11 @@ export const SEPARATOR_HEIGHT = 1;
 /** How far either side of a separator still counts as grabbing it. */
 const SEPARATOR_GRAB = 5;
 
+/** The dots on a draggable divider: three, because two reads as an ellipsis. */
+const GRIP_DOTS = 3;
+const GRIP_RADIUS = 1.5;
+const GRIP_SPACING = 5;
+
 /**
  * A pane stops being a pane below roughly two and a half lines of the chart's
  * own type — there is nowhere left to put an axis label and a plot.
@@ -210,7 +216,7 @@ export function separatorAt(chart, y) {
  * @param {number} hovered index of the separator under the pointer, or -1
  */
 export function drawPaneSeparators(ctx, chart, hovered) {
-    const { separatorColor, separatorHoverColor } = chart.options.layout.panes;
+    const { separatorColor, separatorHoverColor, enableResize } = chart.options.layout.panes;
 
     for (let index = 0; index < chart.panes.length - 1; index++) {
         const top = chart.panes[index].plot.bottom;
@@ -225,6 +231,39 @@ export function drawPaneSeparators(ctx, chart, hovered) {
             ctx.fillStyle = separatorHoverColor;
             ctx.fillRect(chart.plot.left, top - SEPARATOR_GRAB, chart.width, SEPARATOR_GRAB * 2 + SEPARATOR_HEIGHT);
         }
+
+        if (enableResize) {
+            drawGrip(ctx, chart, top, separatorColor);
+        }
+    }
+}
+
+/**
+ * The three dots that say a divider can be dragged.
+ *
+ * A one-pixel line is the whole affordance otherwise: it looks like a border,
+ * and a reader has no reason to try dragging a border. The grab area is ten
+ * pixels tall and nobody knows, which is the same as it not being there.
+ *
+ * Drawn only when the panes can actually be resized — advertising a handle
+ * that does nothing is worse than the bare line.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Object} chart
+ * @param {number} top the separator's own y
+ * @param {string} color
+ */
+function drawGrip(ctx, chart, top, color) {
+    const middle = (chart.plot.left + chart.plot.right) / 2;
+    const centre = top + SEPARATOR_HEIGHT / 2;
+    const span = (GRIP_DOTS - 1) * GRIP_SPACING;
+
+    ctx.fillStyle = color;
+
+    for (let dot = 0; dot < GRIP_DOTS; dot++) {
+        ctx.beginPath();
+        ctx.arc(middle - span / 2 + dot * GRIP_SPACING, centre, GRIP_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
     }
 }
 
@@ -400,8 +439,8 @@ export function paneApi(chart, pane) {
 
                 try {
                     primitive.attached?.({ chart: chart.api, requestUpdate: () => chart.scheduleRender() });
-                } catch {
-                    // noop
+                } catch (error) {
+                    report(chart, error, 'primitive.attached');
                 }
 
                 chart.scheduleRender();
@@ -415,8 +454,8 @@ export function paneApi(chart, pane) {
 
                 try {
                     primitive.detached?.();
-                } catch {
-                    // noop
+                } catch (error) {
+                    report(chart, error, 'primitive.detached');
                 }
 
                 chart.scheduleRender();

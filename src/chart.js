@@ -11,7 +11,12 @@ import {
     isRightToLeft,
 } from './options.js';
 import { FULL_BUILD } from './flags.js';
+import { report, warn } from './errors.js';
+import { drawSessions } from './sessions.js';
+import { drawAnnotations } from './annotate.js';
+import { dataProblems, updateProblems } from './validate.js';
 import { attachKeyboard } from './keyboard.js';
+import { prefersReducedMotion } from './motion.js';
 import { palette, watchPreferred } from './theme.js';
 import { TimeScale } from './scales.js';
 import {
@@ -218,7 +223,7 @@ export function seriesPriceRange(series, from, to) {
  * @param {number} to
  * @return {{minValue: number, maxValue: number}|null}
  */
-export function widenForPrimitives(primitives, range, from, to) {
+export function widenForPrimitives(primitives, range, from, to, chart) {
     let widened = range;
 
     for (const primitive of primitives) {
@@ -226,7 +231,8 @@ export function widenForPrimitives(primitives, range, from, to) {
 
         try {
             info = primitive.autoscaleInfo?.(from, to);
-        } catch {
+        } catch (error) {
+            report(chart, error, 'primitive.autoscaleInfo');
             continue;
         }
 
@@ -265,7 +271,9 @@ export function applyAutoscaleProvider(series, range) {
 
     try {
         info = series.options.autoscaleInfoProvider(() => ({ priceRange: { ...range } }));
-    } catch {
+    } catch (error) {
+        report(series.chart, error, 'series.autoscaleInfoProvider');
+
         return range;
     }
 
@@ -421,13 +429,14 @@ export function magnetY(pane, index, y, mode, skipHidden = true) {
  *
  * @param {Object[]} primitives
  */
-function refreshPrimitives(primitives) {
+function refreshPrimitives(primitives, chart) {
     for (const primitive of primitives) {
         try {
             primitive.updateAllViews?.();
-        } catch {
+        } catch (error) {
             // A primitive that cannot update still gets asked to draw; it is
             // its own business whether it has anything to show.
+            report(chart, error, 'primitive.updateAllViews');
         }
     }
 }
@@ -445,13 +454,14 @@ function refreshPrimitives(primitives) {
  * @param {Object} pane
  * @param {Object[]} badges collected so far, appended to in place
  */
-function collectPrimitiveBadges(primitives, record, pane, badges) {
+function collectPrimitiveBadges(primitives, record, pane, badges, chart) {
     for (const primitive of primitives) {
         let views;
 
         try {
             views = primitive.priceAxisViews?.() ?? [];
-        } catch {
+        } catch (error) {
+            report(chart, error, 'primitive.priceAxisViews');
             continue;
         }
 
@@ -483,8 +493,9 @@ function collectPrimitiveBadges(primitives, record, pane, badges) {
                     // been told a lie about the contract.
                     tick: view.tickVisible?.() !== false,
                 });
-            } catch {
+            } catch (error) {
                 // One broken view costs its own label, not the axis.
+                report(chart, error, 'primitive.priceAxisView');
             }
         }
     }
@@ -496,13 +507,14 @@ function collectPrimitiveBadges(primitives, record, pane, badges) {
  * @param {Object[]} primitives
  * @param {Object[]} labels collected so far, appended to in place
  */
-function collectTimeAxisLabels(primitives, labels) {
+function collectTimeAxisLabels(primitives, labels, chart) {
     for (const primitive of primitives) {
         let views;
 
         try {
             views = primitive.timeAxisViews?.() ?? [];
-        } catch {
+        } catch (error) {
+            report(chart, error, 'primitive.timeAxisViews');
             continue;
         }
 
@@ -517,8 +529,9 @@ function collectTimeAxisLabels(primitives, labels) {
                 if (Number.isFinite(x)) {
                     labels.push({ x, text: view.text(), background: view.backColor(), textColor: view.textColor() });
                 }
-            } catch {
+            } catch (error) {
                 // One broken view costs its own label, not the axis.
+                report(chart, error, 'primitive.timeAxisView');
             }
         }
     }
@@ -805,14 +818,15 @@ function hitBeats(candidate, winner) {
  * @param {Object|null} winner best hit found so far
  * @return {Object|null}
  */
-export function hitTestPrimitives(primitives, x, y, winner = null) {
+export function hitTestPrimitives(primitives, x, y, winner = null, chart) {
     for (const primitive of primitives) {
         let hit;
 
         try {
             hit = primitive.hitTest?.(x, y);
-        } catch {
+        } catch (error) {
             // A primitive that throws while hit testing simply is not hit.
+            report(chart, error, 'primitive.hitTest');
             continue;
         }
 
@@ -867,9 +881,10 @@ class Series {
                 series: this.api,
                 requestUpdate: () => this.chart.scheduleRender(),
             });
-        } catch {
+        } catch (error) {
             // Attaching is the primitive's own business; a failure there is
             // not a reason to leave the chart in a half-registered state.
+            report(this.chart, error, 'primitive.attached');
         }
 
         this.chart.scheduleRender();
@@ -889,8 +904,8 @@ class Series {
 
         try {
             primitive.detached?.();
-        } catch {
-            // noop
+        } catch (error) {
+            report(this.chart, error, 'primitive.detached');
         }
 
         this.chart.scheduleRender();
@@ -1118,11 +1133,22 @@ class Series {
     setData(data) {
         const points = [];
 
+        let arrivedInOrder = true;
+
         for (const item of Array.isArray(data) ? data : []) {
             const timestamp = toTimestamp(item.time);
 
             if (timestamp === null) {
                 continue;
+            }
+
+            const previous = points[points.length - 1];
+
+            if (previous && timestamp < previous.ts) {
+                // Noted here rather than worked out afterwards: the sort below
+                // destroys the evidence, and comparing the caller's own `time`
+                // values would mean guessing at their type.
+                arrivedInOrder = false;
             }
 
             points.push(normalisePoint(item, timestamp));
@@ -1145,17 +1171,33 @@ class Series {
         }
 
         this.points = points;
+
+        if (this.chart.options.validateData) {
+            for (const problem of dataProblems(this, data, points, arrivedInOrder)) {
+                warn(this.chart, problem);
+            }
+        }
     }
 
     update(item) {
         const timestamp = toTimestamp(item.time);
 
         if (timestamp === null) {
+            if (this.chart.options.validateData) {
+                warn(this.chart, `update() was given a time it could not read: ${String(item?.time)}.`);
+            }
+
             return;
         }
 
         const point = normalisePoint(item, timestamp);
         const last = this.points[this.points.length - 1];
+
+        if (this.chart.options.validateData) {
+            for (const problem of updateProblems(this, point, last)) {
+                warn(this.chart, problem);
+            }
+        }
 
         // Stamped on every update, whether or not anything is animating: the
         // option can be turned on between one tick and the next, and a pulse
@@ -1446,6 +1488,18 @@ export class Chart {
         this.resizeObserver.observe(this.container);
     }
 
+    /**
+     * Lets go of the container, leaving the chart whatever size it is now.
+     *
+     * Disconnected rather than unobserved: the observer watches one element
+     * and is rebuilt by `startAutoSize`, so keeping an empty one alive would
+     * only be a thing to leak.
+     */
+    stopAutoSize() {
+        this.resizeObserver?.disconnect();
+        this.resizeObserver = null;
+    }
+
     /* ---------------------------------------------------------------- data */
 
     /**
@@ -1488,9 +1542,10 @@ export class Chart {
                 // when it arrived; it is owed the other half of that.
                 try {
                     removed.definition.paneView?.destroy?.();
-                } catch {
+                } catch (error) {
                     // Its own clean-up failing is not a reason to leave the
                     // chart half-holding a series it has already dropped.
+                    report(this, error, 'customSeries.destroy');
                 }
 
                 for (const primitive of [...removed.primitives]) {
@@ -1710,6 +1765,7 @@ export class Chart {
                 seriesPriceRange(series, from, to),
                 from,
                 to,
+                this,
             );
 
             if (! range) {
@@ -1857,6 +1913,19 @@ export class Chart {
         const paneTicks = this.panes.map((pane) => pane.priceScale.ticks());
 
         this.drawBackground(ctx);
+
+        // Under the grid: the shading says which hours these are, and a grid
+        // line drawn beneath a translucent wash reads as two different greys
+        // for the same line.
+        if (FULL_BUILD) {
+            drawSessions(ctx, this);
+
+            // Above the session shading and below everything else: a region
+            // somebody has marked is about the readings, so it goes behind
+            // them, but it is not part of the market's own timetable.
+            drawAnnotations(ctx, this);
+        }
+
         this.drawGrid(ctx, paneTicks, timeTicks);
 
         this.panes.forEach((pane, index) => {
@@ -1917,10 +1986,10 @@ export class Chart {
             );
 
             for (const pane of this.panes) {
-                drawPrimitives(pane.primitives, 'normal', target, strip.views);
+                drawPrimitives(pane.primitives, 'normal', target, strip.views, this);
 
                 for (const series of pane.series) {
-                    drawPrimitives(series.primitives, 'normal', target, strip.views);
+                    drawPrimitives(series.primitives, 'normal', target, strip.views, this);
                 }
             }
 
@@ -2081,8 +2150,8 @@ export class Chart {
         ctx.clip();
 
         if (FULL_BUILD) {
-            refreshPrimitives(pane.primitives);
-            drawPrimitives(pane.primitives, 'bottom', target);
+            refreshPrimitives(pane.primitives, this);
+            drawPrimitives(pane.primitives, 'bottom', target, undefined, this);
         }
 
         if (FULL_BUILD) {
@@ -2127,11 +2196,11 @@ export class Chart {
 
             // Views are refreshed once per frame, before anything is asked to
             // paint, so every layer of one primitive sees the same state.
-            refreshPrimitives(series.primitives);
+            refreshPrimitives(series.primitives, this);
 
-            drawPrimitives(series.primitives, 'bottom', target);
+            drawPrimitives(series.primitives, 'bottom', target, undefined, this);
             series.definition.draw(ctx, context);
-            drawPrimitives(series.primitives, 'normal', target);
+            drawPrimitives(series.primitives, 'normal', target, undefined, this);
             drawMarkers(ctx, context);
 
             if (series.options.priceLineVisible) {
@@ -2144,7 +2213,7 @@ export class Chart {
                 this.drawLastPricePulse(ctx, series);
             }
 
-            drawPrimitives(series.primitives, 'top', target);
+            drawPrimitives(series.primitives, 'top', target, undefined, this);
 
             if (dimmed) {
                 ctx.restore();
@@ -2152,8 +2221,8 @@ export class Chart {
         }
 
         if (FULL_BUILD) {
-            drawPrimitives(pane.primitives, 'normal', target);
-            drawPrimitives(pane.primitives, 'top', target);
+            drawPrimitives(pane.primitives, 'normal', target, undefined, this);
+            drawPrimitives(pane.primitives, 'top', target, undefined, this);
         }
 
         ctx.restore();
@@ -2177,7 +2246,9 @@ export class Chart {
     drawLastPricePulse(ctx, series) {
         const mode = series.options.lastPriceAnimation;
 
-        if (! mode || ! series.definition.lastValueColor) {
+        // Asked each frame rather than once: a reader can turn the setting on
+        // with the chart in front of them, and the next frame should be still.
+        if (! mode || ! series.definition.lastValueColor || prefersReducedMotion()) {
             return;
         }
 
@@ -2624,14 +2695,14 @@ export class Chart {
         // reader where the level is but not what it is worth, which is the
         // half of the answer they came for.
         for (const series of drawn) {
-            collectPrimitiveBadges(series.primitives, record, pane, badges);
+            collectPrimitiveBadges(series.primitives, record, pane, badges, this);
         }
 
         // Only against the pane's own scale. A pane-level primitive belongs to
         // no series and so to no particular scale, and adding it to every
         // record would print its label twice on a chart with a left axis.
         if (record === pane) {
-            collectPrimitiveBadges(pane.primitives, record, pane, badges);
+            collectPrimitiveBadges(pane.primitives, record, pane, badges, this);
         }
 
         return badges;
@@ -2941,10 +3012,10 @@ export class Chart {
         const labels = [];
 
         for (const pane of this.panes) {
-            collectTimeAxisLabels(pane.primitives, labels);
+            collectTimeAxisLabels(pane.primitives, labels, this);
 
             for (const series of pane.series) {
-                collectTimeAxisLabels(series.primitives, labels);
+                collectTimeAxisLabels(series.primitives, labels, this);
             }
         }
 
@@ -3318,10 +3389,10 @@ export class Chart {
         let winner = null;
 
         for (const pane of this.panes) {
-            winner = hitTestPrimitives(pane.primitives, point.x, point.y, winner);
+            winner = hitTestPrimitives(pane.primitives, point.x, point.y, winner, this);
 
             for (const series of pane.series) {
-                winner = hitTestPrimitives(series.primitives, point.x, point.y, winner);
+                winner = hitTestPrimitives(series.primitives, point.x, point.y, winner, this);
             }
         }
 
@@ -3919,7 +3990,10 @@ export class Chart {
             // A flick that ended in a reading is not a flick. Carrying the
             // chart on after the finger lifts would slide the bar out from
             // under the price the reader just stopped to look at.
-            if (! wasTracking && this.options.kineticScroll?.touch && Math.abs(this.pointer.touchSpeed) > 1) {
+            // Momentum is movement the reader did not ask for at the moment it
+            // happens — the finger has already left the glass.
+            if (! wasTracking && this.options.kineticScroll?.touch
+                && ! prefersReducedMotion() && Math.abs(this.pointer.touchSpeed) > 1) {
                 this.cancelKinetic = startKineticScroll(this, this.pointer.touchSpeed);
             }
         }
@@ -4211,8 +4285,15 @@ export class Chart {
             this.applySize(options.width ?? this.width, options.height ?? this.height);
         }
 
+        // Both directions. Only starting it meant `autoSize` could be switched
+        // on and never off: the observer went on resizing the chart back to
+        // its container, so a later `width`/`height` was applied and then
+        // undone on the next frame, and the option read as broken rather than
+        // one-way.
         if (options && options.autoSize) {
             this.startAutoSize();
+        } else if (options && options.autoSize === false) {
+            this.stopAutoSize();
         }
 
         this.scheduleRender();
@@ -4229,8 +4310,9 @@ export class Chart {
             for (const series of pane.series) {
                 try {
                     series.definition.paneView?.destroy?.();
-                } catch {
+                } catch (error) {
                     // Their clean-up, their problem; ours continues.
+                    report(this, error, 'customSeries.destroy');
                 }
 
                 for (const primitive of [...series.primitives]) {
@@ -4249,8 +4331,7 @@ export class Chart {
             this.renderHandle = null;
         }
 
-        this.resizeObserver?.disconnect();
-        this.resizeObserver = null;
+        this.stopAutoSize();
 
         this.element.removeEventListener('mousemove', this.onPointerMove);
         this.element.removeEventListener('mouseleave', this.onPointerLeave);

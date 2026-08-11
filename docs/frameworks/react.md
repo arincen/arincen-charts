@@ -208,5 +208,6 @@ Types ship with the package. Nothing to install.
 ## What next
 
 - [Vue](/frameworks/vue) — the same shapes, different lifecycle
+- [Svelte](/frameworks/svelte) — the same again, with less ceremony
 - [Live data](/start/live-data)
 - [A live streaming chart](/recipes/streaming)

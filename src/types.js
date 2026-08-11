@@ -289,6 +289,15 @@
  * @property {HandleScaleOptions|boolean} [handleScale]
  * @property {{exitMode: 'onTouchEnd'|'onNextTap'}} [trackingMode] the touch crosshair
  * @property {{touch?: boolean, mouse?: boolean}} [kineticScroll] full build only
+ * @property {'light'|'dark'|'auto'|null} [theme] a palette laid under everything else
+ * @property {boolean} [loading] say a request is in flight
+ * @property {boolean} [handleKeyboard] full build only; on by default
+ * @property {((error: unknown, source: string) => void)|null} [onError] told when code
+ *   the chart does not own throws; the chart survives either way
+ * @property {boolean} [validateData] check what setData and update are given, and
+ *   say what is wrong with it
+ * @property {{from: string|number, to: string|number, days?: number[], timeZone?: string,
+ *   color?: string}|null} [sessions] shade the hours a market is shut; full build only
  */
 
 /**
@@ -309,6 +318,8 @@
  * @property {string} [crosshairMarkerBackgroundColor]
  * @property {number} [crosshairMarkerBorderWidth]
  * @property {number} [lastPriceAnimation] a `LastPriceAnimationMode`; full build only
+ * @property {boolean} [tintAxes] carry this series' fill on into the axis gutters
+ * @property {number} [bodyRadius] corner radius on a candle body, in pixels
  * @property {boolean} [baseLineVisible] the zero of a percentage or indexed axis; full build only
  * @property {string} [baseLineColor]
  * @property {number} [baseLineWidth]

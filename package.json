@@ -1,7 +1,7 @@
 {
     "name": "@arincen/charts",
     "version": "0.1.0",
-    "description": "A financial chart in about 13 KB, with zero dependencies. Two builds from one codebase: a light one that compiles structural features out, and a full one that keeps them.",
+    "description": "A financial chart an AI agent can read: about 22 KB, zero dependencies. Two builds from one codebase, and toText/annotate so a model can describe the chart and draw its answer back.",
     "license": "MIT",
     "author": "Arincen L.L.C-FZ",
     "homepage": "https://en.arincen.com/arincen-charts",
@@ -22,7 +22,11 @@
         "financial",
         "candlestick",
         "trading",
-        "stock"
+        "stock",
+        "ai",
+        "agent",
+        "llm",
+        "accessible"
     ],
     "type": "module",
     "sideEffects": false,
@@ -49,6 +53,7 @@
     "files": [
         "dist",
         "README.md",
+        "CHANGELOG.md",
         "LICENSE",
         "NOTICE"
     ],

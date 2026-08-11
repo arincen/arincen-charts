@@ -1,3 +1,5 @@
+import { report } from './errors.js';
+
 /**
  * The canvas handed to a primitive's renderer.
  *
@@ -74,13 +76,14 @@ export function createRenderTarget(ctx, mediaSize, pixelRatio, origin = { x: 0, 
  * @param {Object} target
  * @param {string} [views] which set of views to ask for
  */
-export function drawPrimitives(primitives, layer, target, views = 'paneViews') {
+export function drawPrimitives(primitives, layer, target, views = 'paneViews', chart) {
     for (const primitive of primitives) {
         let list;
 
         try {
             list = primitive[views]?.() ?? [];
-        } catch {
+        } catch (error) {
+            report(chart, error, `primitive.${views}`);
             continue;
         }
 
@@ -96,8 +99,9 @@ export function drawPrimitives(primitives, layer, target, views = 'paneViews') {
 
                 renderer?.drawBackground?.(target);
                 renderer?.draw?.(target);
-            } catch {
+            } catch (error) {
                 // A broken primitive loses its own drawing, not the chart.
+                report(chart, error, 'primitive.draw');
             }
         }
     }

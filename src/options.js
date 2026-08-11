@@ -105,6 +105,23 @@ export function chartDefaults() {
         // showing an empty one. The caller's to set: only they know.
         loading: false,
 
+        // Checks the data a caller hands over and says what is wrong with it
+        // — out of order, duplicated, milliseconds, NaN — rather than drawing
+        // a short or empty chart and leaving them to guess. Warnings only, to
+        // the console, once each per chart.
+        validateData: true,
+
+        // Shades the hours a market is shut, on an intraday chart. The hours
+        // are yours: `{ from: '09:30', to: '16:00', days: [1,2,3,4,5],
+        // timeZone: 'America/New_York' }`. Full build only.
+        sessions: null,
+
+        // Called as `onError(error, source)` when something the chart does not
+        // own — a primitive, a custom series, an autoscale provider — throws.
+        // The chart survives either way; this is how you find out that it did.
+        // Left null, the same failures go to console.error.
+        onError: null,
+
         localization: {
             locale: 'en',
 

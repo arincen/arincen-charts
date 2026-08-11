@@ -23,6 +23,7 @@ export {
     PriceLineSource,
     CrosshairMode,
     PriceScaleMode,
+    sparkline,
 } from './index.js';
 
 // Straight from the options module, not through the light entry: the light
@@ -35,3 +36,4 @@ export { FULL_BUILD } from './flags.js';
 export { createTextWatermark, createImageWatermark } from './watermark.js';
 export { createUpDownMarkers } from './up-down-markers.js';
 export { createTooltip } from './tooltip.js';
+export { prefersReducedMotion } from './motion.js';

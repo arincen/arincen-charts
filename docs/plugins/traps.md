@@ -66,18 +66,36 @@ about each other, so the badge lands under your fill.
 
 Pick one per strip. The badge is what you want unless a badge is not the shape.
 
-## 5. A primitive that throws draws nothing, silently
+## 5. A primitive that throws draws nothing — but it does say so
 
 Every hook — `paneViews`, `hitTest`, each axis view's `text()` and
 `coordinate()` — runs inside a guard. If yours throws, it loses its own
 drawing and the frame continues.
 
 That is deliberate: third-party drawing code should not be able to blank the
-chart it is drawn on. But it means a primitive that draws nothing looks
-identical to one that is being ignored.
+chart it is drawn on. But it used to be *silent* with it, so a primitive that
+threw looked exactly like one that was being ignored — and this page used to
+tell you to check a console that had nothing in it.
+
+It reports now, naming the hook:
+
+```
+[arincen-charts] primitive.paneViews threw  TypeError: Cannot read properties of null
+```
 
 **Check the console before checking your maths.** More missing primitives are a
 `TypeError` on a null coordinate than a layout mistake.
+
+Route it somewhere of your own with [`onError`](/api/chart-options#when-something-throws):
+
+```js
+createChart(container, {
+    onError: (error, source) => Sentry.captureException(error, { tags: { source } }),
+});
+```
+
+Reported once per unique failure per chart, not once per frame — otherwise a
+broken plugin on an open tab reports sixty times a second.
 
 ## 6. Media pixels and device pixels are not the same pixels
 

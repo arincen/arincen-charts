@@ -170,6 +170,256 @@ as a failure that then corrects itself.
 history is the common case, and hiding what is drawn in order to announce it
 would be a worse chart than the one it replaced.
 
+## Trading hours
+
+| option | default | |
+|---|---|---|
+| `sessions` | `null` | shade the hours the market is shut; full build |
+
+An index scale runs its bars end to end, so on an intraday chart the overnight
+gap looks exactly like the lunch hour looks exactly like a fast half-hour.
+There is nothing to say where one day ended.
+
+<ChartDemo :height="320">
+
+```js
+chart.applyOptions({
+    timeScale: { timeVisible: true },
+    sessions: {
+        from: '09:30',
+        to: '16:00',
+        days: [1, 2, 3, 4, 5],           // 0 is Sunday
+        timeZone: 'America/New_York',
+        color: 'rgba(219, 39, 119, 0.06)',
+    },
+});
+
+// Three days of half-hourly readings, so there are nights to shade.
+const midnight = Math.floor(Date.UTC(2024, 0, 2) / 1000);
+const bars = data.slice(0, 144).map((bar, index) => ({
+    time: midnight + index * 1800,
+    value: bar.value,
+}));
+
+chart.addSeries(AreaSeries, {
+    lineColor: '#db2777',
+    topColor: 'rgba(192, 38, 211, 0.28)',
+    bottomColor: 'rgba(234, 88, 12, 0.02)',
+    lineWidth: 2,
+}).setData(bars);
+
+chart.timeScale().fitContent();
+```
+
+</ChartDemo>
+
+**The hours are yours, and there is no list of markets.** Shipping one would
+mean owning every holiday, half-day and daylight-saving change on every
+exchange for ever, and being quietly wrong the first time one of them moves. A
+caller who knows their own market gets it right in four lines.
+
+`timeZone` is any IANA name. It goes to the platform's own database — already
+on the machine, already correct — so summer time needs nothing from you and
+nothing from us.
+
+| | |
+|---|---|
+| `days` | `[1, 2, 3, 4, 5]`. Tadawul is `[0, 1, 2, 3, 4]`, and a market that never shuts is all seven |
+| `to` before `from` | a session through midnight, which is how Sydney is quoted |
+| an hour that cannot be read | nothing is shaded, rather than everything |
+| `color` | drawn under the grid, so a grid line is not two different greys |
+
+Worked out once per dataset, not per frame: an `Intl` call on every visible bar
+sixty times a second is the difference between free and a chart that stutters.
+
+## When the data is wrong
+
+| option | default | |
+|---|---|---|
+| `validateData` | `true` | check what `setData` and `update` are given, and say what is wrong |
+
+Every one of these was a mistake the chart absorbed in silence: an unreadable
+time was skipped, an out-of-order series was quietly sorted, a duplicate
+replaced its twin, a `NaN` drew nothing. The chart came out empty, or short by
+three bars, or flat — and none of that says *why*, so the first suspicion falls
+on the library rather than on the feed.
+
+The chart below is given a deliberately broken series: reversed, with a
+duplicate, an unreadable time and a `NaN` in it. It draws what it can — and
+says what it found. These normally go to the console; they are echoed onto the
+page here so you can read them without opening one.
+
+<ChartDemo :height="420">
+
+```js
+chart.applyOptions({ validateData: true });   // the default, named here to show it exists
+
+// The chart keeps the top; the messages get their own panel underneath rather
+// than being written over the drawing they are about.
+chart.applyOptions({ autoSize: false, width: container.offsetWidth, height: 240 });
+
+const shown = document.createElement('div');
+
+shown.style.cssText = 'position:absolute;top:248px;left:0;right:0;bottom:0;z-index:3;overflow:auto;'
+    + 'padding:10px 12px;border-top:1px solid rgba(127,127,127,0.25);'
+    + 'font:500 11px ui-monospace,monospace;color:#f23645;line-height:1.6';
+container.appendChild(shown);
+
+const console_warn = console.warn;
+
+console.warn = (message) => {
+    shown.appendChild(document.createElement('div')).textContent = message;
+    console_warn(message);
+};
+
+onCleanup(() => { console.warn = console_warn; });
+
+const clean = data.slice(0, 40).map((bar) => ({ time: bar.time, value: bar.value }));
+
+chart.addSeries(LineSeries, { color: '#db2777', lineWidth: 2 }).setData([
+    ...[...clean].reverse(),                       // arrives newest first
+    { time: clean[10].time, value: 123 },          // a time already used
+    { time: 'last Tuesday', value: 130 },          // not a time at all
+    { time: clean[39].time + 86400, value: NaN },  // a price that is not a number
+]);
+
+chart.timeScale().fitContent();
+```
+
+</ChartDemo>
+
+| it says something about | |
+|---|---|
+| times it could not read | counted, with the accepted formats |
+| readings out of order | they are sorted; a feed that emits out of order usually means two responses were concatenated |
+| duplicate times | only the last of each survives, so the chart is shorter than the array |
+| a value that is not a finite number | `NaN`, `Infinity`, or a price quoted as a string |
+| a high below its low | that candle draws upside down |
+| `setData` given something that is not an array | the shape of handing over a whole `{ data: [...] }` response |
+| `update` going backwards | usually two subscriptions running at once |
+
+**Warnings, never errors.** Nothing here stops a chart drawing. The data that
+reaches production is not the data anyone tested with, and a chart that refuses
+to draw is worse than a chart with a gap in it.
+
+**Each is said once per chart**, so a page that reloads its series on every
+timeframe change does not fill the console with the same line.
+
+**A gap is not a fault.** A reading with no value is whitespace — the one way
+to say *"the market was closed"* without inventing a price — and warning about
+it would teach people to ignore the warnings.
+
+**Milliseconds are not a fault either**, because they work: times are converted
+on the way in. It nearly got a warning of its own.
+
+**It is on in production too**, not behind a build flag. The environment tricks
+do not survive into a `<script>` tag, and a bad feed is *more* likely in
+production — that is where the odd symbol, the holiday and the exchange's own
+clock live. Turn it off where the console must stay clean:
+
+```js
+createChart(container, { validateData: false });
+```
+
+That changes nothing about what is drawn.
+
+## When something throws
+
+| option | default | |
+|---|---|---|
+| `onError` | `null` | called as `onError(error, source)`; `null` sends the same to `console.error` |
+
+A chart draws from code it does not own — your primitives, your custom series,
+your `autoscaleInfoProvider` — and one of those throwing must not take the
+chart down. A broken indicator costs its own drawing and nothing else.
+
+That part is unchanged. What changed is that it used to happen in **silence**:
+the failure was caught, dropped, and never mentioned, so an author whose `draw`
+threw on the first frame saw their plugin missing, an empty console, and
+nothing to search for.
+
+The primitive below throws on every frame. The chart is fine; the message
+underneath it is `onError` doing its job:
+
+<ChartDemo :height="340">
+
+```js
+// The chart keeps the top, so the report is not written over the drawing.
+chart.applyOptions({ autoSize: false, width: container.offsetWidth, height: 280 });
+
+const series = chart.addSeries(AreaSeries, {
+    lineColor: '#db2777',
+    topColor: 'rgba(192, 38, 211, 0.28)',
+    bottomColor: 'rgba(234, 88, 12, 0.02)',
+    lineWidth: 2,
+});
+
+series.setData(data.map((bar) => ({ time: bar.time, value: bar.value })));
+chart.timeScale().fitContent();
+
+const shown = document.createElement('div');
+
+shown.style.cssText = 'position:absolute;top:288px;left:0;right:0;bottom:0;z-index:3;'
+    + 'padding:10px 12px;border-top:1px solid rgba(127,127,127,0.25);'
+    + 'font:600 12px ui-monospace,monospace;color:#f23645';
+container.appendChild(shown);
+
+chart.applyOptions({
+    onError: (error, source) => {
+        shown.textContent = `${source} — ${error.message}`;
+    },
+});
+
+// A primitive with a bug in it, of the usual kind: something that is null on
+// the first frame and read anyway.
+series.attachPrimitive({
+    paneViews: () => {
+        const missing = null;
+
+        return [{ renderer: () => ({ draw: () => missing.context.fillRect(0, 0, 1, 1) }) }];
+    },
+});
+```
+
+</ChartDemo>
+
+### The contract
+
+**It is notification, never control flow.** Returning from your handler cannot
+make the chart retry, and throwing from it is ignored — that is the one place a
+failure really cannot be allowed to cascade, because it is already the error
+path.
+
+**Reported once per unique failure per chart.** These live inside the render
+loop: a primitive that throws while drawing throws again on the next frame, and
+a chart left open would otherwise report the same fault sixty times a second —
+to your console, or to whatever service is listening and billing. A *different*
+message from the same place is still reported, so one fixed fault does not mask
+the next.
+
+**`source` names the hook**, which is the difference between a report and a
+shrug:
+
+| source | |
+|---|---|
+| `primitive.paneViews` · `primitive.draw` | drawing, and asking what to draw |
+| `primitive.updateAllViews` | the per-frame refresh |
+| `primitive.priceAxisViews` · `primitive.priceAxisView` | the list, and one label in it |
+| `primitive.timeAxisViews` · `primitive.timeAxisView` | the same for the time axis |
+| `primitive.hitTest` | testing the pointer against your drawing |
+| `primitive.attached` · `primitive.detached` | the lifecycle pair |
+| `series.autoscaleInfoProvider` | full build; the range falls back to the chart's own |
+| `customSeries.draw` · `customSeries.destroy` | full build |
+
+**What is thrown is passed on as thrown.** It need not be an `Error` — a
+handler forwarding to an error service wants what actually happened, not a
+wrapper around it.
+
+**It does not cover your own mistakes on the main API.** Bad data handed to
+`setData`, or an option that makes no sense, throws to your caller where you
+can see it. `onError` is for the code the chart calls on your behalf, where
+there is no caller to throw to.
+
 ## layout
 
 | option | default | |

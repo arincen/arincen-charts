@@ -2,9 +2,27 @@
 
 [Documentation](https://docs.arincen.com/charts) · [Overview](https://en.arincen.com/charts)
 
-A financial chart that draws itself on a canvas, in about **20 KB gzipped**, with **zero dependencies**.
+A financial chart that draws itself on a canvas, in about **22 KB gzipped**, with **zero dependencies**.
 
 Both numbers are checked rather than claimed: a test gzips the shipped bundle and fails if it has grown past its budget or if the figure written here is not the one it measured, and there is nothing in `dependencies` to audit.
+
+## A chart an agent can read
+
+Every charting library draws for eyes. Anything else — a language model, a screen reader, an alerting job — has to reach into series internals and write the same summary again in every project.
+
+```js
+chart.toText();     // what is on screen, in words, deterministic and free of judgement
+chart.toImage();    // the same thing as a PNG, for a vision model
+chart.annotate([    // the answer, back on the chart
+    { from, to, text },      // a region
+    { time, price, text },   // a point
+    { price, text },         // a level
+]);
+```
+
+No API key, no bundled model, no provider you are tied to. What is missing everywhere else is the boring half — getting the numbers *out* in a form something can reason about, and getting an answer *back* onto the canvas.
+
+[The whole loop](https://docs.arincen.com/charts/recipes/ai).
 
 ## Two builds from one codebase
 
@@ -14,8 +32,8 @@ So the split is made at build time:
 
 | | size | has |
 |---|---|---|
-| `@arincen/charts` | ~20 KB | line, area, candlestick, bar, histogram, baseline · crosshair · markers · price lines · primitives · pan/zoom |
-| `@arincen/charts/full` | ~26 KB | all of that, plus panes, logarithmic / percentage / indexed price scales, left and overlay scales, custom series, watermarks, touch tracking, kinetic scroll |
+| `@arincen/charts` | ~22 KB | line, area, candlestick, bar, histogram, baseline · crosshair · markers · price lines · primitives · pan/zoom |
+| `@arincen/charts/full` | ~31 KB | all of that, plus panes, logarithmic / percentage / indexed price scales, left and overlay scales, custom series, watermarks, touch tracking, kinetic scroll |
 
 ```js
 import { createChart, AreaSeries } from '@arincen/charts';

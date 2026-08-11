@@ -36,6 +36,11 @@ Turn `lastValueVisible` and `priceLineVisible` off on every series but the
 primary one. Four series each drawing a rule is four rules across the plot.
 [More](/guide/markers#the-last-value-label).
 
+`lastPriceAnimation` is the one option here that answers to something other than
+you: the pulse holds still for a reader whose system asks for
+[less movement](/guide/interaction#movement-nobody-asked-for), whichever mode
+you set.
+
 Every one of those set at once, including the pulse:
 
 <ChartDemo :height="300">

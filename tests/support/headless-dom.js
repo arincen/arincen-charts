@@ -152,6 +152,11 @@ function element(tag) {
         },
     });
 
+    // Real elements carry the document they came from, and the library uses it
+    // rather than the global one — a chart built inside a popup window or an
+    // iframe has to make its canvases in *that* document, not this one.
+    node.ownerDocument = globalThis.document;
+
     return tag === 'canvas' ? Object.assign(node, canvas()) : node;
 }
 

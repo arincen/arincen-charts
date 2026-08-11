@@ -86,10 +86,39 @@ store the height and a narrower window restores the wrong proportions.
 ## Resizing by hand
 
 The divider between two panes is draggable, with a grab area wider than the
-line itself. Turn it off with:
+line itself, and it carries **three grip dots** in the middle to say so.
+
+That is not decoration. Without them the whole affordance is a one-pixel line,
+which reads as a border — and nobody tries to drag a border. The grab area is
+ten pixels tall and no one knows it is there, which is the same as it not being
+there.
+
+Drag the divider below — the dots are in the middle of it:
+
+<ChartDemo :height="360">
 
 ```js
-createChart(container, { layout: { panes: { enableResize: false } } });
+const bars = data.slice(-70);
+
+chart.addSeries(LineSeries, { color: '#db2777', lineWidth: 2 }, 0)
+    .setData(bars.map((bar) => ({ time: bar.time, value: bar.value })));
+
+chart.addSeries(LineSeries, { color: '#22ab94', lineWidth: 2, lastValueVisible: false }, 1)
+    .setData(bars.map((bar, index) => ({
+        time: bar.time,
+        value: 50 + Math.abs(bar.close - bar.open) * 8 + (index % 9) * 2,
+    })));
+
+chart.timeScale().fitContent();
+```
+
+</ChartDemo>
+
+The dots appear only when the panes can actually be resized. Advertising a
+handle that does nothing is worse than the bare line:
+
+```js
+createChart(container, { layout: { panes: { enableResize: false } } });   // no grip drawn
 ```
 
 ## The pane API

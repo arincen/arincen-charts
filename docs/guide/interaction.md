@@ -145,11 +145,17 @@ legend.style.cssText = 'position:absolute;top:10px;left:14px;font:600 13px syste
 legend.textContent = '—';
 container.appendChild(legend);
 
-chart.subscribeCrosshairMove((param) => {
+const update = (param) => {
     const point = param.time ? param.seriesData.get(series) : null;
 
     legend.textContent = point ? point.value.toFixed(2) : '—';
-});
+};
+
+chart.subscribeCrosshairMove(update);
+
+// Hand back the same function you passed in. A handler that outlives the
+// component holding it keeps that component's whole scope alive with it.
+onCleanup(() => chart.unsubscribeCrosshairMove(update));
 ```
 
 </ChartDemo>
@@ -401,7 +407,7 @@ slider.type = 'range';
 slider.min = 0;
 slider.max = values.length - 1;
 slider.value = Math.floor(values.length / 2);
-slider.style.cssText = 'position:absolute;bottom:36px;left:12px;right:70px;z-index:3';
+slider.style.cssText = 'position:absolute;bottom:36px;left:12px;right:110px;z-index:3';
 container.appendChild(slider);
 
 const place = () => {
@@ -411,24 +417,58 @@ const place = () => {
 };
 
 slider.oninput = place;
-slider.onpointerleave = () => chart.clearCrosshairPosition();
 place();
 
-// The subscription is here to show the other half of the pair; a real page
-// would drive a legend from it.
-const watch = () => {};
+// Clearing belongs on something the reader meant to press. Hanging it on the
+// slider's own pointerleave wipes the crosshair the moment they move the mouse
+// away to look at what they just placed.
+const clear = document.createElement('button');
 
-chart.subscribeCrosshairMove(watch);
-onCleanup(() => chart.unsubscribeCrosshairMove(watch));
+clear.textContent = 'Clear';
+clear.style.cssText = 'position:absolute;bottom:30px;right:70px;z-index:3;'
+    + 'font:600 12px system-ui;padding:2px 10px;border:1px solid #db2777;'
+    + 'border-radius:999px;color:#db2777;background:transparent;cursor:pointer';
+clear.onclick = () => chart.clearCrosshairPosition();
+container.appendChild(clear);
+
+// A legend is updated here, beside the placement — not from
+// subscribeCrosshairMove, which this does not fire. See below.
+const legend = document.createElement('div');
+
+legend.style.cssText = 'position:absolute;top:10px;left:14px;font:600 13px system-ui;'
+    + 'color:#db2777;pointer-events:none;z-index:3';
+container.appendChild(legend);
+
+const show = () => {
+    const point = values[Number(slider.value)];
+
+    legend.textContent = point.value.toFixed(2);
+};
+
+slider.addEventListener('input', show);
+show();
 ```
 
 </ChartDemo>
+
+::: warning It does not fire your crosshair handler
+`setCrosshairPosition` moves the crosshair without emitting a crosshair event.
+That is deliberate: the first thing anyone builds with it is two charts
+subscribed to each other, and emitting would have them calling each other for
+ever.
+
+The consequence is easy to miss — **a legend fed from
+`subscribeCrosshairMove` will not update when you place the crosshair
+yourself.** Update it from the same code that does the placing, as above.
+:::
 
 ## Touch
 
 Touch is handled without configuration: drag to pan, pinch to zoom, and a long
 press puts the crosshair where your finger is. Kinetic scrolling is on for
-touch and off for the mouse, which matches what each input feels like.
+touch and off for the mouse, which matches what each input feels like — and it
+stands down entirely for a reader who has
+[asked for less movement](#movement-nobody-asked-for).
 
 ```js
 chart.applyOptions({
@@ -559,6 +599,80 @@ createChart(container, { handleKeyboard: false });
 A [sparkline](/recipes/sparkline) in a table has nothing to announce and should
 not be a tab stop — thirty of them would be thirty stops between the reader and
 whatever comes after the table.
+
+## Movement nobody asked for
+
+Two things on a chart move on their own: the ring pulsing on the last price, and
+the glide that carries a flicked chart after the finger has left it. Both stop
+by themselves when the reader's system asks for less movement.
+
+::: tip Nothing to configure
+There is no option for this and no setup step. The chart reads
+`prefers-reduced-motion` itself.
+:::
+
+<ChartDemo :height="320">
+
+```js
+const series = chart.addSeries(AreaSeries, {
+    lineColor: '#db2777',
+    topColor: 'rgba(192, 38, 211, 0.28)',
+    bottomColor: 'rgba(234, 88, 12, 0.02)',
+    lineWidth: 2,
+    lastValueColor: '#db2777',
+    lastPriceAnimation: LastPriceAnimationMode.Continuous,
+});
+
+series.setData(data.map((bar) => ({ time: bar.time, value: bar.value })));
+chart.timeScale().fitContent();
+
+// The chart already checks this. The export is here for the rest of your UI —
+// a flashing badge beside the chart should agree with the chart.
+const note = document.createElement('div');
+
+note.style.cssText = 'position:absolute;top:10px;left:14px;font:600 13px system-ui;'
+    + 'color:#db2777;pointer-events:none;z-index:3';
+note.textContent = prefersReducedMotion()
+    ? 'Your system asks for less movement — the last price is still.'
+    : 'Your system has no objection — the last price pulses.';
+
+container.appendChild(note);
+```
+
+</ChartDemo>
+
+Change the setting with the chart already open and the next frame obeys it. The
+answer is read per frame rather than cached at construction, because a reader
+who turns it on partway through should not have to reload the page to be
+listened to.
+
+### Reading it yourself
+
+```js
+import { prefersReducedMotion } from '@arincen/charts';
+
+if (! prefersReducedMotion()) {
+    badge.classList.add('is-flashing');
+}
+```
+
+It returns `false` where the question cannot be asked — a server render, or an
+old browser without `matchMedia`. Guessing `true` there would quietly switch off
+a feature nobody objected to.
+
+Full build only, and so are both of the things it governs. A light chart has no
+last-price pulse and does not glide after a flick — it accepts
+`kineticScroll: { touch: true }` without complaint and ignores it — so there is
+nothing there to suppress. If you need the check itself in a light-build page,
+`window.matchMedia('(prefers-reduced-motion: reduce)').matches` is the whole
+implementation.
+
+### What is not covered
+
+The animation on `setData` and the smooth camera moves on
+[`scrollToPosition`](/api/#moving-the-view) are movement you asked
+for at a moment the reader acted, not movement that runs on its own — those are
+still yours to gate.
 
 ## Turning it all off
 
