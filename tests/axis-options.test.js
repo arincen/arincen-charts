@@ -2,6 +2,9 @@ import './support/full-build.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { magnetPrice, moveInOrder, sourcePoint, spreadBadges } from '../src/chart.js';
+
+/** The price alone: the helper reports the scale it came from as well. */
+const snappedPrice = (...args) => magnetPrice(...args)?.price ?? null;
 import { formatDatePattern } from '../src/time.js';
 import { TimeScale, PriceScale } from '../src/scales.js';
 import { CrosshairMode, PriceLineSource } from '../src/options.js';
@@ -152,8 +155,8 @@ test('the magnet ignores hidden series, and can be told not to', () => {
     // The pointer sits right next to the hidden series' reading.
     const near = 500 - 189;
 
-    assert.equal(magnetPrice(pane, 0, near, CrosshairMode.Magnet), 100, 'it snapped to a series nobody can see');
-    assert.equal(magnetPrice(pane, 0, near, CrosshairMode.Magnet, false), 190, 'the option could not be turned off');
+    assert.equal(snappedPrice(pane, 0, near, CrosshairMode.Magnet), 100, 'it snapped to a series nobody can see');
+    assert.equal(snappedPrice(pane, 0, near, CrosshairMode.Magnet, false), 190, 'the option could not be turned off');
 });
 
 /**

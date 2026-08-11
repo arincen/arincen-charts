@@ -183,6 +183,21 @@ the same strip of axis.
 chart.addSeries(LineSeries, { priceLineVisible: false, lastValueVisible: false });
 ```
 
+### The shape of a badge
+
+A price badge is a tag with a point on the plot-facing edge, not a rectangle
+butted against the axis. A rectangle says only "this number belongs to this
+axis"; the point answers the question a reader actually has when two badges sit
+close together and one of them is the live price — *which line is this?*
+
+The point tracks the price rather than sitting at the badge's centre. A badge
+near the top or bottom of a pane is nudged inward to stay whole, and a centred
+point would then aim a few pixels off the level it names — visibly wrong exactly
+where the last price sits on a chart that has been scrolled back.
+
+The [time label](/guide/time-scale) is the same shape rotated: rounded, with a
+point on its top edge aiming at the column it names.
+
 ## Line styles
 
 ```js

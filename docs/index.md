@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: Arincen Charts
-  text: Financial charts in 18 KB
+  text: Financial charts in 20 KB
   tagline: A canvas charting engine with zero dependencies, in two builds — one that carries everything, and one that has the rest compiled out.
   actions:
     - theme: brand
@@ -14,7 +14,7 @@ hero:
       link: https://github.com/arincen/arincen-charts
 
 features:
-  - title: 18 KB, and it is measured
+  - title: 20 KB, and it is measured
     details: A test gzips the shipped bundle and fails if any size written anywhere on this site is not the one it measured. That heading drifted four kilobytes before the test existed.
   - title: No dependencies
     details: Nothing in `dependencies` to audit, update, or have a CVE filed against. The whole library is one file with no imports outside itself.

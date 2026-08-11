@@ -69,8 +69,8 @@ export function leftScaleDefaults() {
         autoScale: true,
         mode: PriceScaleMode.Normal,
         borderVisible: true,
-        borderColor: '#d6dcde',
-        scaleMargins: { top: 0.2, bottom: 0.1 },
+        borderColor: '#e5e5e5',
+        scaleMargins: { top: 0.16, bottom: 0.12 },
         minimumWidth: 0,
         ticksVisible: false,
         alignLabels: true,
@@ -86,7 +86,7 @@ export function chartDefaults() {
         autoSize: false,
         layout: {
             background: { type: 'solid', color: '#ffffff' },
-            textColor: '#191919',
+            textColor: '#0a0a0a',
             fontSize: 12,
             fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
             attributionLogo: true,
@@ -96,8 +96,22 @@ export function chartDefaults() {
             // tool as they picked them, instead of flattened into sRGB.
             colorSpace: 'srgb',
         },
+        // A palette laid under everything else: 'light', 'dark', or 'auto' to
+        // follow the reader's system. Null leaves the built-in light values,
+        // which is what a caller who has never heard of this option gets.
+        theme: null,
+
+        // Set while a request is in flight, so the chart says so rather than
+        // showing an empty one. The caller's to set: only they know.
+        loading: false,
+
         localization: {
             locale: 'en',
+
+            // Shown in the middle of an otherwise empty chart. Set either to
+            // null to draw nothing at all.
+            emptyText: 'No data',
+            loadingText: 'Loading…',
             priceFormatter: null,
             timeFormatter: null,
 
@@ -110,26 +124,26 @@ export function chartDefaults() {
             percentageFormatter: null,
         },
         grid: {
-            vertLines: { visible: true, color: '#e6e6e6', style: LineStyle.Solid },
-            horzLines: { visible: true, color: '#e6e6e6', style: LineStyle.Solid },
+            vertLines: { visible: true, color: '#e5e5e5', style: LineStyle.Dotted },
+            horzLines: { visible: true, color: '#e5e5e5', style: LineStyle.Dotted },
         },
         crosshair: {
             mode: CrosshairMode.Magnet,
             vertLine: {
                 visible: true,
-                color: '#9598a1',
+                color: '#737373',
                 width: 1,
-                style: LineStyle.LargeDashed,
+                style: LineStyle.Dotted,
                 labelVisible: true,
-                labelBackgroundColor: '#131722',
+                labelBackgroundColor: '#0a0a0a',
             },
             horzLine: {
                 visible: true,
-                color: '#9598a1',
+                color: '#737373',
                 width: 1,
-                style: LineStyle.LargeDashed,
+                style: LineStyle.Dotted,
                 labelVisible: true,
-                labelBackgroundColor: '#131722',
+                labelBackgroundColor: '#0a0a0a',
             },
 
             // Ours defaults the other way round from theirs, deliberately.
@@ -138,6 +152,11 @@ export function chartDefaults() {
             // is a magnet pulling towards nothing. The option exists so a
             // caller who wants their behaviour can ask for it.
             doNotSnapToHiddenSeriesIndices: true,
+
+            // Bring the series under the pointer forward by fading the others.
+            // On by default: a chart carrying four lines is asking the reader
+            // to follow one of them, and nothing else on it says which.
+            dimOtherSeries: true,
         },
         rightPriceScale: {
             visible: true,
@@ -145,8 +164,8 @@ export function chartDefaults() {
             // Modes beyond Normal exist only in the full build.
             mode: PriceScaleMode.Normal,
             borderVisible: true,
-            borderColor: '#d6dcde',
-            scaleMargins: { top: 0.2, bottom: 0.1 },
+            borderColor: '#e5e5e5',
+            scaleMargins: { top: 0.16, bottom: 0.12 },
             minimumWidth: 0,
 
             // A small mark joining each label to the axis line.
@@ -168,19 +187,19 @@ export function chartDefaults() {
         timeScale: {
             visible: true,
             borderVisible: true,
-            borderColor: '#d6dcde',
+            borderColor: '#e5e5e5',
             timeVisible: false,
             secondsVisible: false,
             fixLeftEdge: false,
             fixRightEdge: false,
             rightOffset: 0,
-            barSpacing: 6,
+            barSpacing: 8,
 
             // Follow new bars only while the newest one is on screen. A reader
             // who has scrolled back into history did not ask to be dragged
             // forward every time a tick arrives.
             shiftVisibleRangeOnNewBar: true,
-            minBarSpacing: 0.5,
+            minBarSpacing: 0.4,
 
             // Zero means no ceiling, matching the convention a caller will
             // already have met: an option that clamps is off when it is nought,
@@ -237,6 +256,25 @@ function isPlainObject(value) {
  * @param {Object} source
  * @return {Object}
  */
+/**
+ * Languages written right to left.
+ *
+ * Matched on the language subtag alone, so `ar-SA` and `ar` are the same
+ * answer. The list is short and closed: these are the scripts in use, not a
+ * guess at what a tag might mean.
+ */
+const RTL_LANGUAGES = ['ar', 'he', 'fa', 'ur', 'ps', 'sd', 'ug', 'yi', 'dv', 'ku'];
+
+/**
+ * Whether a locale reads right to left.
+ *
+ * @param {string} locale
+ * @return {boolean}
+ */
+export function isRightToLeft(locale) {
+    return RTL_LANGUAGES.includes(String(locale ?? '').toLowerCase().split(/[-_]/)[0]);
+}
+
 export function mergeOptions(target, source) {
     if (! isPlainObject(source)) {
         return target;
@@ -278,13 +316,13 @@ export function applyLineStyle(ctx, style, width) {
             ctx.setLineDash([width, width]);
             break;
         case LineStyle.Dashed:
-            ctx.setLineDash([4 * width, 2 * width]);
+            ctx.setLineDash([3 * width, 3 * width]);
             break;
         case LineStyle.LargeDashed:
-            ctx.setLineDash([6 * width, 6 * width]);
+            ctx.setLineDash([8 * width, 5 * width]);
             break;
         case LineStyle.SparseDotted:
-            ctx.setLineDash([width, 4 * width]);
+            ctx.setLineDash([width, 5 * width]);
             break;
         default:
             ctx.setLineDash([]);

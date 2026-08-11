@@ -5,6 +5,13 @@ pointer redraws only that one, so the data underneath is never touched — which
 is why a chart holding half a million bars still tracks the pointer at the
 refresh rate of the display.
 
+Each line is drawn twice: a wide, faint wash of its own colour, then the
+hairline on top. One hairline cannot be both dark enough to survive a white
+candle and light enough to leave a dark one intact, and the usual answer —
+pick the darker — loses the line over a filled body, which is exactly where
+the price being read came from. The wash separates the line from whatever is
+under it without reading as a second line.
+
 <ChartDemo :height="320">
 
 ```js
@@ -67,11 +74,11 @@ chart.applyOptions({
         mode: CrosshairMode.Magnet,
         vertLine: {
             visible: true,
-            color: '#9598a1',
+            color: '#737373',
             width: 1,
-            style: LineStyle.LargeDashed,
+            style: LineStyle.Dotted,
             labelVisible: true,
-            labelBackgroundColor: '#131722',
+            labelBackgroundColor: '#0a0a0a',
         },
         horzLine: { /* the same shape */ },
     },
@@ -146,6 +153,156 @@ chart.subscribeCrosshairMove((param) => {
 ```
 
 </ChartDemo>
+
+## Bringing one series forward
+
+Four lines on one chart is a comparison, and while the reader is following one
+of them the other three are noise. Hover near any line below — it keeps its
+colour and the rest fade back.
+
+<ChartDemo :height="320">
+
+```js
+const values = data.map((bar) => ({ time: bar.time, value: bar.value }));
+const shades = ['#db2777', '#0891b2', '#ea580c', '#22ab94'];
+
+shades.forEach((colour, index) => {
+    chart.addSeries(LineSeries, {
+        color: colour,
+        lineWidth: 2,
+        priceLineVisible: index === 0,
+        lastValueVisible: index === 0,
+    }).setData(values.map((point) => ({ time: point.time, value: point.value - index * 7 })));
+});
+
+// On by default; here explicitly, beside the reach it uses.
+chart.applyOptions({ crosshair: { dimOtherSeries: true } });
+chart.timeScale().fitContent();
+```
+
+</ChartDemo>
+
+Nothing is hidden — the faded lines are still readable, still hit-testable, and
+still in the crosshair's data. Set `dimOtherSeries: false` to turn it off.
+
+## A tooltip, without writing one
+
+::: tip Full build only
+`createTooltip` is in `@arincen/charts/full`.
+:::
+
+```js
+import { createChart, createTooltip } from '@arincen/charts/full';
+
+const tip = createTooltip(chart);
+```
+
+That is the whole integration. It subscribes to the crosshair, reads the values
+under the pointer, positions itself, flips near the edges, and disappears when
+the pointer leaves.
+
+<ChartDemo :height="340">
+
+```js
+const price = chart.addSeries(CandlestickSeries, {
+    upColor: '#22ab94',
+    downColor: '#f23645',
+    borderUpColor: '#22ab94',
+    borderDownColor: '#f23645',
+    wickUpColor: '#22ab94',
+    wickDownColor: '#f23645',
+    title: 'ARN',
+});
+
+price.setData(data.slice(-70));
+chart.timeScale().fitContent();
+
+const tip = createTooltip(chart);
+
+onCleanup(() => tip.remove());
+```
+
+</ChartDemo>
+
+Hover it, then move toward the right-hand edge — it flips to the other side of
+the pointer rather than being clamped against the edge, which would leave it
+sitting on top of the bars it is describing.
+
+### Options
+
+| option | default | |
+|---|---|---|
+| `visible` | `true` | hide without removing |
+| `position` | `'pointer'` | or `'top-left'`, `'top-right'` |
+| `showTime` | `true` | the time above the values |
+| `series` | `null` | which series to report; `null` means all with a reading |
+| `formatter` | `null` | write the contents yourself |
+| `style` | `{}` | merged into the element's inline style |
+| `className` | `''` | for styling from your own stylesheet |
+
+`position: 'top-left'` pins it to a corner, which is what a busy chart usually
+wants — a tooltip that moves is a tooltip the reader's eye has to chase.
+
+### Writing the contents
+
+```js
+createTooltip(chart, {
+    formatter: ({ time, readings }) => readings
+        .map(({ series, point }) => `${series.options().title}: ${point.value.toFixed(2)}`)
+        .join(' · '),
+});
+```
+
+Return a string and it is set as **text**, never as markup — a formatter is
+handed values from a data feed, and a feed that can put markup on your page is
+a feed that can put a script on it. Return an element if you want structure,
+and `null` to show nothing for that reading.
+
+<ChartDemo :height="340">
+
+```js
+const values = data.map((bar) => ({ time: bar.time, value: bar.value }));
+
+const series = chart.addSeries(AreaSeries, {
+    lineColor: '#db2777',
+    topColor: 'rgba(192, 38, 211, 0.26)',
+    bottomColor: 'rgba(234, 88, 12, 0.02)',
+    lineWidth: 2,
+});
+
+series.setData(values);
+chart.timeScale().fitContent();
+
+const tip = createTooltip(chart, {
+    position: 'top-left',
+    showTime: false,
+    formatter: ({ logical, readings }) => {
+        const { point } = readings[0];
+        const previous = values[Math.max(0, Math.round(logical) - 1)];
+        const change = point.value - previous.value;
+        const sign = change >= 0 ? '▲' : '▼';
+
+        return `${point.value.toFixed(2)}   ${sign} ${Math.abs(change).toFixed(2)}`;
+    },
+});
+
+onCleanup(() => tip.remove());
+```
+
+</ChartDemo>
+
+### Handle
+
+```js
+tip.applyOptions({ position: 'top-right' });
+tip.options();
+tip.element();     // the div, for styling or measuring
+tip.remove();      // unsubscribes and takes the element with it
+```
+
+`remove()` is not optional in a single-page application: the tooltip holds a
+crosshair subscription, and a chart that is thrown away without it keeps the
+subscription and the element alive.
 
 ## Clicks
 
@@ -334,6 +491,74 @@ top of the chart just as the reader is trying to read it. The container sets
 wrap the chart in your own element and re-enable selection on it, you will get
 the callout back.
 :::
+
+## Keyboard and screen readers
+
+::: tip Full build only, and on by default
+A chart nobody can reach without a pointer has its prices locked behind a
+mouse. That is not something to opt into, so `handleKeyboard` defaults to
+`true` in the full build.
+:::
+
+Click the chart below, or tab to it, then use the arrow keys.
+
+<ChartDemo :height="320">
+
+```js
+const series = chart.addSeries(CandlestickSeries, {
+    upColor: '#22ab94',
+    downColor: '#f23645',
+    borderUpColor: '#22ab94',
+    borderDownColor: '#f23645',
+    wickUpColor: '#22ab94',
+    wickDownColor: '#f23645',
+    title: 'ARN',
+});
+
+series.setData(data.slice(-70));
+chart.timeScale().fitContent();
+
+// Nothing to switch on — this is the default. Shown here to say it exists.
+chart.applyOptions({ handleKeyboard: true });
+```
+
+</ChartDemo>
+
+| key | |
+|---|---|
+| ← → | one reading at a time |
+| Page Up / Page Down | ten at a time |
+| Home / End | the first and last reading |
+| Escape | put the crosshair away |
+
+The first arrow press opens the crosshair in the **middle of what is on
+screen**, not at the newest reading. Starting at the newest sounds right and
+puts it hard against the right edge, half under the price axis, so the first
+press looks as though nothing happened. Home and End are absolute and mean what
+they say either way.
+
+Every move announces the reading through a hidden live region — the date, the
+series title, and the price or all four prices. Moving focus away clears the
+crosshair.
+
+**Keys the chart does not use are left alone.** Swallowing everything takes the
+arrow keys from a reader trying to scroll the page past the chart, and Tab from
+everyone.
+
+**The chart is `role="img"` with a label, not `role="application"`.**
+`application` tells a screen reader to hand every keystroke through and stop
+offering its own navigation — a large promise to make on behalf of a chart, and
+one that takes away the keys the reader already knows.
+
+Turn it off where a chart is decoration rather than information:
+
+```js
+createChart(container, { handleKeyboard: false });
+```
+
+A [sparkline](/recipes/sparkline) in a table has nothing to announce and should
+not be a tab stop — thirty of them would be thirty stops between the reader and
+whatever comes after the table.
 
 ## Turning it all off
 

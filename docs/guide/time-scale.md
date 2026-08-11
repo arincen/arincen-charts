@@ -216,8 +216,8 @@ chart.applyOptions({
 
 | option | default | what it does |
 |---|---|---|
-| `barSpacing` | `6` | pixels per slot — the zoom level |
-| `minBarSpacing` | `0.5` | how far in you can zoom out |
+| `barSpacing` | `8` | pixels per slot — the zoom level |
+| `minBarSpacing` | `0.4` | how far in you can zoom out |
 | `maxBarSpacing` | `0` | how far you can zoom in; `0` means the built-in ceiling |
 | `rightOffset` | `0` | slots of empty space kept to the right of the last bar |
 | `shiftVisibleRangeOnNewBar` | `true` | a new bar moves the view, but only if you were already at the edge |
@@ -297,6 +297,14 @@ That is almost always what you want and it surprises people who expected either
 "always follow" or "never move". If you want the chart pinned to the live edge
 regardless, call `scrollToRealTime()` on a button rather than fighting this
 option.
+
+### The crosshair's date tag
+
+Rounded, with a point on the edge facing the plot, aimed at the column it
+names — the same shape as a [price badge](/guide/markers#the-shape-of-a-badge)
+turned ninety degrees. A label near either end of the axis slides inward to stay
+on screen, and the point tracks the crosshair rather than the label's own
+centre, so it goes on indicating the right bar.
 
 ### Writing the labels yourself
 

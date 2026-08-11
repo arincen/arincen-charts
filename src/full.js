@@ -34,3 +34,4 @@ export { LastPriceAnimationMode } from './options.js';
 export { FULL_BUILD } from './flags.js';
 export { createTextWatermark, createImageWatermark } from './watermark.js';
 export { createUpDownMarkers } from './up-down-markers.js';
+export { createTooltip } from './tooltip.js';

@@ -26,12 +26,156 @@ chart.options();   // the resolved tree
 `height` for a fixed-size chart — a [sparkline](/recipes/sparkline) in a dense
 table, where thirty observers would be thirty observers for nothing.
 
+## Theme
+
+| option | default | |
+|---|---|---|
+| `theme` | `null` | `'light'`, `'dark'`, or `'auto'` to follow the reader's system |
+
+A dark chart by hand is nine values across five branches — background, text,
+both grid colours, both crosshair colours, both crosshair **label backgrounds**,
+and the axis borders. The label backgrounds are the ones almost everybody
+misses: left dark under a dark theme, the price under the pointer becomes dark
+text on a dark tag, which is the number the reader was reaching for.
+
+```js
+createChart(container, { theme: 'dark' });
+```
+
+<ChartDemo :height="300">
+
+```js
+chart.applyOptions({ theme: 'dark' });
+
+chart.addSeries(CandlestickSeries, {
+    upColor: '#22ab94',
+    downColor: '#f23645',
+    borderUpColor: '#22ab94',
+    borderDownColor: '#f23645',
+    wickUpColor: '#22ab94',
+    wickDownColor: '#f23645',
+}).setData(data.slice(-60));
+
+chart.timeScale().fitContent();
+```
+
+</ChartDemo>
+
+**The palette is applied under your own options, never over them**, so this
+means what it looks like it means:
+
+```js
+createChart(container, {
+    theme: 'dark',
+    grid: { vertLines: { visible: false } },   // still yours
+});
+```
+
+Switch at runtime with `applyOptions`, which is all a site's dark-mode toggle
+needs:
+
+```js
+chart.applyOptions({ theme: isDark ? 'dark' : 'light' });
+```
+
+### `'auto'`
+
+Follows `prefers-color-scheme` and **keeps following it** — a reader who
+switches their system while the chart is on screen sees it change. Where the
+query is unavailable — a server render, an old browser — it falls back to
+light, because a chart that cannot ask should not guess dark and hand back
+white on white.
+
+```js
+createChart(container, { theme: 'auto' });
+```
+
+### Only two, deliberately
+
+There is no way to register a third. A palette is a product decision, and a
+library that accepts arbitrary ones ends up owning everyone's taste — anything
+beyond light and dark is better written as the options it would have set
+anyway. An unknown name is ignored rather than throwing: a typo in a colour
+scheme should not take a chart down.
+
+## Waiting for data
+
+| option | default | |
+|---|---|---|
+| `loading` | `false` | say a request is in flight |
+| `localization.emptyText` | `'No data'` | shown on an otherwise empty chart; `null` draws nothing |
+| `localization.loadingText` | `'Loading…'` | shown instead while `loading` is set |
+
+A chart with nothing to draw used to label a full price axis — `0.00` through
+`1.00` — over a grid, with nothing to say the numbers were invented. On a
+financial chart that is not an empty state; it is a chart stating prices it does
+not have, and every consumer saw it for the length of their first fetch.
+
+The axis is silent now when there is nothing to scale, and a line of text says
+why.
+
+<ChartDemo :height="240">
+
+```js
+// A chart with no series at all. Previously an axis reading 0.00 to 1.00.
+chart.applyOptions({
+    localization: {
+        emptyText: 'No data for this period',
+        loadingText: 'Fetching…',
+    },
+});
+
+// Flip to the loading message after a moment, to show which one wins.
+const waiting = setTimeout(() => chart.applyOptions({ loading: true }), 2000);
+
+onCleanup(() => clearTimeout(waiting));
+
+// So the page has something to compare against, a second chart with readings
+// is built beside it.
+const panel = document.createElement('div');
+
+panel.style.cssText = 'position:absolute;inset:0 0 0 50%;border-left:1px solid #e5e5e5';
+container.appendChild(panel);
+
+const beside = createChart(panel, {
+    autoSize: true,
+    layout: { background: { type: 'solid', color: 'transparent' }, attributionLogo: false },
+});
+
+beside.addSeries(LineSeries, { color: '#db2777', lineWidth: 2 })
+    .setData(data.map((bar) => ({ time: bar.time, value: bar.value })));
+
+beside.timeScale().fitContent();
+
+onCleanup(() => beside.remove());
+```
+
+</ChartDemo>
+
+**`loading` is yours to set**, because only you know a request is in flight:
+
+```js
+chart.applyOptions({ loading: true });
+
+const candles = await fetch(url).then((response) => response.json());
+
+series.setData(candles);
+chart.applyOptions({ loading: false });
+```
+
+Without it a chart flashes *"No data"* on its way to having some, which reads
+as a failure that then corrects itself.
+
+**Neither message covers a chart that already has readings.** Loading more
+history is the common case, and hiding what is drawn in order to announce it
+would be a worse chart than the one it replaced.
+
 ## layout
 
 | option | default | |
 |---|---|---|
 | `layout.background` | `{ type: 'solid', color: '#ffffff' }` | see below |
-| `layout.textColor` | `'#191919'` | axis labels |
+| `layout.textColor` | `'#0a0a0a'` | axis labels |
 | `layout.fontSize` | `12` | axis labels, in CSS pixels |
 | `layout.fontFamily` | the system stack | any CSS `font-family` value |
 | `layout.attributionLogo` | `true` | the Arincen Charts mark — [why](/attribution) |
@@ -46,7 +190,7 @@ table, where thirty observers would be thirty observers for nothing.
 layout: { background: { type: 'solid', color: '#0a0a0a' } }
 
 layout: {
-    background: { type: 'gradient', topColor: '#131722', bottomColor: '#0a0a0a' },
+    background: { type: 'gradient', topColor: '#171717', bottomColor: '#0a0a0a' },
 }
 ```
 
@@ -65,11 +209,11 @@ and reds, and only on a P3 display. Leave it alone unless a designer asks.
 | option | default | |
 |---|---|---|
 | `grid.vertLines.visible` | `true` | |
-| `grid.vertLines.color` | `'#e6e6e6'` | |
-| `grid.vertLines.style` | `LineStyle.Solid` | |
+| `grid.vertLines.color` | `'#e5e5e5'` | |
+| `grid.vertLines.style` | `LineStyle.Dotted` | |
 | `grid.horzLines.visible` | `true` | |
-| `grid.horzLines.color` | `'#e6e6e6'` | |
-| `grid.horzLines.style` | `LineStyle.Solid` | |
+| `grid.horzLines.color` | `'#e5e5e5'` | |
+| `grid.horzLines.style` | `LineStyle.Dotted` | |
 
 Vertical grid lines are drawn at the time axis' tick positions and horizontal
 ones at the price axis'. Turning off one and keeping the other is common and
@@ -83,13 +227,14 @@ Covered in full in [crosshair and interaction](/guide/interaction).
 |---|---|---|
 | `crosshair.mode` | `CrosshairMode.Magnet` | `Normal`, `Magnet`, `MagnetOHLC`, `Hidden` |
 | `crosshair.vertLine.visible` | `true` | |
-| `crosshair.vertLine.color` | `'#9598a1'` | |
+| `crosshair.vertLine.color` | `'#737373'` | |
 | `crosshair.vertLine.width` | `1` | |
-| `crosshair.vertLine.style` | `LineStyle.LargeDashed` | |
+| `crosshair.vertLine.style` | `LineStyle.Dotted` | |
 | `crosshair.vertLine.labelVisible` | `true` | the tag on the time axis |
-| `crosshair.vertLine.labelBackgroundColor` | `'#131722'` | |
+| `crosshair.vertLine.labelBackgroundColor` | `'#0a0a0a'` | |
 | `crosshair.horzLine.*` | the same six | on the price axis |
 | `crosshair.doNotSnapToHiddenSeriesIndices` | `true` | see below |
+| `crosshair.dimOtherSeries` | `true` | fade the other series while one has the pointer |
 
 ### `doNotSnapToHiddenSeriesIndices`
 
@@ -99,6 +244,26 @@ does not jump to a price nobody can see.
 
 Turn it off when a hidden series is still meaningful to the reader: an
 indicator you draw yourself from a hidden source series, for instance.
+
+### `dimOtherSeries`
+
+A chart carrying four lines is asking the reader to follow one of them, and
+nothing on it says which. With this on — the default — the series nearest the
+pointer keeps its colour and the rest fade back, so the one being read comes
+forward without anything being hidden.
+
+It does nothing on a chart with a single series, and nothing while the pointer
+is more than about fourteen pixels from any series: fading three lines because
+the pointer drifted vaguely toward a fourth costs the reader the comparison
+they came for and gives them no idea what they did to cause it.
+
+Nearest is measured in pixels against every value a reading carries — open,
+high, low and close, not only the close — so a candle claims the pointer
+anywhere inside its body.
+
+```js
+chart.applyOptions({ crosshair: { dimOtherSeries: false } });
+```
 
 ## Price scales
 
@@ -115,8 +280,8 @@ visible by default and the left is not. Full detail in
 | `alignLabels` | `true` | nudge labels apart so they never overlap |
 | `entireTextOnly` | `false` | drop a label rather than clip it at the edge |
 | `borderVisible` | `true` | |
-| `borderColor` | `'#d6dcde'` | |
-| `scaleMargins` | `{ top: 0.2, bottom: 0.1 }` | fractions of the pane kept clear |
+| `borderColor` | `'#e5e5e5'` | |
+| `scaleMargins` | `{ top: 0.16, bottom: 0.12 }` | fractions of the pane kept clear |
 | `minimumWidth` | `0` | force a width, in CSS pixels |
 | `ticksVisible` | `false` | small marks beside each label |
 
@@ -135,9 +300,9 @@ Covered in full in [the time scale](/guide/time-scale#options).
 | option | default | |
 |---|---|---|
 | `visible` | `true` | |
-| `borderVisible` / `borderColor` | `true` / `'#d6dcde'` | |
-| `barSpacing` | `6` | pixels per slot |
-| `minBarSpacing` | `0.5` | zoom-out limit |
+| `borderVisible` / `borderColor` | `true` / `'#e5e5e5'` | |
+| `barSpacing` | `8` | pixels per slot |
+| `minBarSpacing` | `0.4` | zoom-out limit |
 | `maxBarSpacing` | `0` | zoom-in limit; `0` uses the built-in ceiling |
 | `rightOffset` | `0` | slots of empty space after the last bar |
 | `shiftVisibleRangeOnNewBar` | `true` | follow new bars, if already at the edge |
@@ -202,6 +367,14 @@ width and the crosshair does not.
 
 `axisPressedMouseMove` also accepts `{ time: true, price: false }` when you
 want one axis draggable and the other fixed.
+
+## handleKeyboard
+
+| option | default | |
+|---|---|---|
+| `handleKeyboard` | `true` | **full build** — focus, arrow keys and a live region |
+
+See [keyboard and screen readers](/guide/interaction#keyboard-and-screen-readers).
 
 ## kineticScroll
 

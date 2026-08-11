@@ -115,7 +115,7 @@ export function drawMarkers(ctx, context) {
 
         const size = shapeSizeFor(timeScale.barSpacing, marker.size);
         const position = marker.position ?? 'aboveBar';
-        const color = marker.color ?? '#2196f3';
+        const color = marker.color ?? '#db2777';
         const gap = size > 0 ? size * 0.9 : 6;
 
         let y;

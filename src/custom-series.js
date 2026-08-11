@@ -34,7 +34,7 @@ export function customSeriesDefinition(paneView) {
 
         defaults: () => ({ ...commonDefaults(), ...(paneView.defaultOptions?.() ?? {}) }),
 
-        lastValueColor: (options) => options.color ?? options.lineColor ?? '#2962ff',
+        lastValueColor: (options) => options.color ?? options.lineColor ?? '#db2777',
 
         draw(ctx, context) {
             const { series, options, priceScale, timeScale, target, from, to } = context;

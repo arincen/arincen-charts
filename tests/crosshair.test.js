@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { magnetPrice } from '../src/chart.js';
+
+/** The price alone: the helper reports the scale it came from as well. */
+const snappedPrice = (...args) => magnetPrice(...args)?.price ?? null;
 import { CrosshairMode } from '../src/options.js';
 
 /**
@@ -21,14 +24,14 @@ const at = (value) => [{ value }];
 test('a free crosshair is never pulled off the pointer', () => {
     const pane = paneWith(at(100));
 
-    assert.equal(magnetPrice(pane, 0, 480, CrosshairMode.Normal), null);
-    assert.equal(magnetPrice(pane, 0, 480, CrosshairMode.Hidden), null);
+    assert.equal(snappedPrice(pane, 0, 480, CrosshairMode.Normal), null);
+    assert.equal(snappedPrice(pane, 0, 480, CrosshairMode.Hidden), null);
 });
 
 test('a magnetised crosshair sticks to the closing value', () => {
     const pane = paneWith(at(100));
 
-    assert.equal(magnetPrice(pane, 0, 480, CrosshairMode.Magnet), 100);
+    assert.equal(snappedPrice(pane, 0, 480, CrosshairMode.Magnet), 100);
 });
 
 /**
@@ -39,8 +42,8 @@ test('a magnetised crosshair sticks to the closing value', () => {
 test('the crosshair snaps to whichever series is nearest, not the first', () => {
     const pane = paneWith(at(100), at(200));
 
-    assert.equal(magnetPrice(pane, 0, 500 - 190, CrosshairMode.Magnet), 200);
-    assert.equal(magnetPrice(pane, 0, 500 - 110, CrosshairMode.Magnet), 100);
+    assert.equal(snappedPrice(pane, 0, 500 - 190, CrosshairMode.Magnet), 200);
+    assert.equal(snappedPrice(pane, 0, 500 - 110, CrosshairMode.Magnet), 100);
 });
 
 test('distance is judged in pixels, so a bent axis still snaps to what looks nearest', () => {
@@ -51,7 +54,7 @@ test('distance is judged in pixels, so a bent axis still snaps to what looks nea
         .map((byIndex) => ({ options: { visible: true }, byIndex, scale: pane }));
 
     // Sits at 2.9 decades: far from 10 in price, close to 1000 on screen.
-    assert.equal(magnetPrice(pane, 0, 500 - 290, CrosshairMode.Magnet), 1000);
+    assert.equal(snappedPrice(pane, 0, 500 - 290, CrosshairMode.Magnet), 1000);
 });
 
 test('an invisible series offers no candidates', () => {
@@ -59,7 +62,7 @@ test('an invisible series offers no candidates', () => {
 
     pane.series[1].options.visible = false;
 
-    assert.equal(magnetPrice(pane, 0, 500 - 190, CrosshairMode.Magnet), 100);
+    assert.equal(snappedPrice(pane, 0, 500 - 190, CrosshairMode.Magnet), 100);
 });
 
 /**
@@ -79,34 +82,34 @@ const candle = (open, high, low, close) => [{ ts: 1, open, high, low, close }];
 test('a candlestick snaps in the default magnet mode', () => {
     const pane = paneWith(candle(90, 140, 80, 105));
 
-    assert.equal(magnetPrice(pane, 0, 500 - 104, CrosshairMode.Magnet), 105);
+    assert.equal(snappedPrice(pane, 0, 500 - 104, CrosshairMode.Magnet), 105);
 });
 
 test('magnet ignores open, high and low', () => {
     const pane = paneWith(candle(90, 140, 80, 100));
 
-    assert.equal(magnetPrice(pane, 0, 500 - 138, CrosshairMode.Magnet), 100);
+    assert.equal(snappedPrice(pane, 0, 500 - 138, CrosshairMode.Magnet), 100);
 });
 
 test('magnet OHLC snaps to whichever of the four prices is nearest', () => {
     const bar = candle(90, 140, 80, 100);
 
-    assert.equal(magnetPrice(paneWith(bar), 0, 500 - 138, CrosshairMode.MagnetOHLC), 140);
-    assert.equal(magnetPrice(paneWith(bar), 0, 500 - 82, CrosshairMode.MagnetOHLC), 80);
-    assert.equal(magnetPrice(paneWith(bar), 0, 500 - 91, CrosshairMode.MagnetOHLC), 90);
+    assert.equal(snappedPrice(paneWith(bar), 0, 500 - 138, CrosshairMode.MagnetOHLC), 140);
+    assert.equal(snappedPrice(paneWith(bar), 0, 500 - 82, CrosshairMode.MagnetOHLC), 80);
+    assert.equal(snappedPrice(paneWith(bar), 0, 500 - 91, CrosshairMode.MagnetOHLC), 90);
 });
 
 test('a bar with no data at that index is skipped', () => {
     const pane = paneWith([undefined, { value: 100 }]);
 
-    assert.equal(magnetPrice(pane, 0, 480, CrosshairMode.Magnet), null);
-    assert.equal(magnetPrice(pane, 1, 480, CrosshairMode.Magnet), 100);
+    assert.equal(snappedPrice(pane, 0, 480, CrosshairMode.Magnet), null);
+    assert.equal(snappedPrice(pane, 1, 480, CrosshairMode.Magnet), 100);
 });
 
 test('whitespace offers nothing to snap to', () => {
     const pane = paneWith([{ value: null }]);
 
-    assert.equal(magnetPrice(pane, 0, 480, CrosshairMode.Magnet), null);
+    assert.equal(snappedPrice(pane, 0, 480, CrosshairMode.Magnet), null);
 });
 
 /**
@@ -126,10 +129,10 @@ test('a series on its own scale is measured through that scale', () => {
 
     // 30000 on the overlay sits at y=200, far from 100 in price but next to it
     // on screen; the pointer at y=205 belongs to the overlay series.
-    assert.equal(magnetPrice(pane, 0, 205, CrosshairMode.Magnet), 30000);
-    assert.equal(magnetPrice(pane, 0, 395, CrosshairMode.Magnet), 100);
+    assert.equal(snappedPrice(pane, 0, 205, CrosshairMode.Magnet), 30000);
+    assert.equal(snappedPrice(pane, 0, 395, CrosshairMode.Magnet), 100);
 });
 
 test('an empty pane leaves the pointer alone', () => {
-    assert.equal(magnetPrice(paneWith(), 0, 480, CrosshairMode.Magnet), null);
+    assert.equal(snappedPrice(paneWith(), 0, 480, CrosshairMode.Magnet), null);
 });

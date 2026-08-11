@@ -88,11 +88,8 @@ overridden still use it.
 
 ## Right-to-left
 
-The chart draws left to right regardless of the page's direction, and that is
-correct: time runs left to right in every locale, and a mirrored time axis
-would put the newest bar where readers of *any* language look for the oldest.
-
-What does follow the locale is the text.
+Set an RTL locale and the chart follows it — **except the plot**, which never
+mirrors.
 
 ```js
 createChart(container, {
@@ -103,9 +100,98 @@ createChart(container, {
 });
 ```
 
-Put the chart's container in an `dir="ltr"` island if the surrounding page is
-`rtl` and your own overlaid legends are coming out reversed. The canvas is
-unaffected either way; only your DOM is.
+<ChartDemo :height="300">
+
+```js
+chart.applyOptions({
+    localization: {
+        locale: 'ar',
+        priceFormatter: (price) => `${price.toFixed(2)} ر.س`,
+    },
+    timeScale: { timeVisible: false },
+});
+
+chart.addSeries(AreaSeries, {
+    lineColor: '#db2777',
+    topColor: 'rgba(192, 38, 211, 0.28)',
+    bottomColor: 'rgba(234, 88, 12, 0.02)',
+    lineWidth: 2,
+}).setData(data.map((bar) => ({ time: bar.time, value: bar.value })));
+
+chart.timeScale().fitContent();
+```
+
+</ChartDemo>
+
+### What changes
+
+The canvas is told which way its text runs, so a label mixing a month name with
+digits is placed as one piece rather than reordered internally and then anchored
+to the wrong end. It is set before anything is measured, because `measureText`
+reads it too — and the price axis sizes itself from those widths, so setting it
+later would lay the axis out under one direction and paint it under another.
+
+The tooltip and the screen-reader live region are marked `dir` from the
+**chart's** locale rather than the page's. A chart set to Arabic inside an
+English page should still read as Arabic.
+
+Recognised by language subtag, so `ar-SA` and `ar` are the same answer: Arabic,
+Hebrew, Persian, Urdu, Pashto, Sindhi, Uyghur, Yiddish, Divehi and Kurdish.
+
+### What does not
+
+**The plot never mirrors.** Time runs left to right in every locale, and the
+oldest reading is always on the left.
+
+That is not an oversight and it is not us being lazy about RTL. Every Arabic
+and Hebrew financial platform draws it this way, because a chart's horizontal
+axis is not a line of text — it is a physical quantity, and a trader reading
+several platforms at once needs them to agree. A mirrored chart would put the
+newest bar where a reader of *any* language, including yours, looks for the
+oldest.
+
+### Moving the price axis does not move time
+
+The two are independent, and this is worth stating because they look related:
+
+```js
+createChart(container, {
+    localization: { locale: 'ar' },
+    rightPriceScale: { visible: false },
+    leftPriceScale: { visible: true },
+});
+```
+
+Full build only. The axis moves to the left, the plot gets narrower on that
+side, and **the months stay in the same order** — January still to the left of
+February. Where the price labels sit is a layout choice; which way time runs is
+not.
+
+<ChartDemo :height="300">
+
+```js
+chart.applyOptions({
+    localization: { locale: 'ar' },
+    rightPriceScale: { visible: false },
+    leftPriceScale: { visible: true },
+    timeScale: { timeVisible: false },
+});
+
+chart.addSeries(AreaSeries, {
+    priceScaleId: 'left',
+    lineColor: '#db2777',
+    topColor: 'rgba(192, 38, 211, 0.28)',
+    bottomColor: 'rgba(234, 88, 12, 0.02)',
+    lineWidth: 2,
+}).setData(data.map((bar) => ({ time: bar.time, value: bar.value })));
+
+chart.timeScale().fitContent();
+```
+
+</ChartDemo>
+
+Your own DOM around the chart is yours. If you overlay a legend and it comes
+out reversed, that is the page's `dir`, not the chart's.
 
 ## Typography
 
@@ -113,7 +199,7 @@ unaffected either way; only your DOM is.
 |---|---|---|
 | `layout.fontSize` | `12` | axis labels, in CSS pixels |
 | `layout.fontFamily` | the system stack | any CSS `font-family` |
-| `layout.textColor` | `'#191919'` | |
+| `layout.textColor` | `'#0a0a0a'` | |
 
 The font is used for axis labels, crosshair labels, price-line titles and
 series titles. There is no separate setting per element — one font per chart,

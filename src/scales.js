@@ -18,6 +18,17 @@ export class TimeScale {
         this.barSpacing = options.barSpacing;
         this.rightOffset = options.rightOffset;
         this.width = 0;
+
+        /**
+         * Where the plot starts, in canvas pixels.
+         *
+         * Zero whenever the price axis is on the right, which is why this went
+         * unnoticed: with the axis on the left the plot begins partway across
+         * the canvas, and a scale that measures from zero draws every bar that
+         * far to the left — the start of the series clipped away, the rest
+         * misaligned with the crosshair that reads it back.
+         */
+        this.left = 0;
         this.padBars = 0;
         this.padPixels = 0;
     }
@@ -89,11 +100,11 @@ export class TimeScale {
     }
 
     indexToX(index) {
-        return this.width - (this.lastIndex + this.rightOffset - index) * this.barSpacing;
+        return this.left + this.width - (this.lastIndex + this.rightOffset - index) * this.barSpacing;
     }
 
     xToIndex(x) {
-        return this.lastIndex + this.rightOffset - (this.width - x) / this.barSpacing;
+        return this.lastIndex + this.rightOffset - (this.left + this.width - x) / this.barSpacing;
     }
 
     fitContent() {
@@ -135,7 +146,7 @@ export class TimeScale {
      * @return {{from: number, to: number}}
      */
     logicalRange() {
-        return { from: this.xToIndex(0), to: this.xToIndex(this.width) };
+        return { from: this.xToIndex(this.left), to: this.xToIndex(this.left + this.width) };
     }
 
     /**
@@ -147,7 +158,7 @@ export class TimeScale {
         }
 
         const from = Math.max(0, Math.floor(this.xToIndex(0)));
-        const to = Math.min(this.lastIndex, Math.ceil(this.xToIndex(this.width)));
+        const to = Math.min(this.lastIndex, Math.ceil(this.xToIndex(this.left + this.width)));
 
         return { from, to };
     }
@@ -202,7 +213,7 @@ export class TimeScale {
         }
 
         this.barSpacing = nextSpacing;
-        this.rightOffset = focalIndex - this.lastIndex + (this.width - focalX) / nextSpacing;
+        this.rightOffset = focalIndex - this.lastIndex + (this.left + this.width - focalX) / nextSpacing;
         this.clampToEdges();
     }
 
@@ -397,15 +408,29 @@ export class PriceScale {
         this.max = 1;
         this.top = 0;
         this.bottom = 0;
+
+        /**
+         * Whether the range came from data or from the fallback.
+         *
+         * The fallback exists so `priceToY` answers a number rather than NaN
+         * while a chart is waiting for its first reading. What it must not do
+         * is reach the axis: a chart with no data was labelling itself 0.00 to
+         * 1.00, which on a financial chart is not an empty state, it is a chart
+         * stating prices it does not have.
+         */
+        this.hasRange = false;
     }
 
     setRange(min, max) {
         if (! Number.isFinite(min) || ! Number.isFinite(max)) {
             this.min = 0;
             this.max = 1;
+            this.hasRange = false;
 
             return;
         }
+
+        this.hasRange = true;
 
         if (min === max) {
             const padding = Math.abs(min) * 0.05 || 0.5;
@@ -503,7 +528,7 @@ export class PriceScale {
     ticks() {
         const height = this.bottom - this.top;
 
-        if (height <= 0 || ! Number.isFinite(this.min) || ! Number.isFinite(this.max)) {
+        if (height <= 0 || ! this.hasRange || ! Number.isFinite(this.min) || ! Number.isFinite(this.max)) {
             return [];
         }
 

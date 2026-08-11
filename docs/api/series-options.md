@@ -88,7 +88,7 @@ The dot drawn on the series where the crosshair meets it.
 | option | default | |
 |---|---|---|
 | `crosshairMarkerVisible` | `true` | |
-| `crosshairMarkerRadius` | `4` | CSS pixels |
+| `crosshairMarkerRadius` | `5` | CSS pixels |
 | `crosshairMarkerBorderColor` | `''` | empty means the series' colour |
 | `crosshairMarkerBackgroundColor` | `''` | empty means the series' colour |
 | `crosshairMarkerBorderWidth` | `2` | |
@@ -146,7 +146,7 @@ drawn when a series is on a **percentage** or **indexed** price scale, marking
 | option | default | |
 |---|---|---|
 | `baseLineVisible` | `true` | |
-| `baseLineColor` | `'#b2b5be'` | |
+| `baseLineColor` | `'#a3a3a3'` | |
 | `baseLineWidth` | `1` | |
 | `baseLineStyle` | `LineStyle.Solid` | |
 
@@ -234,7 +234,7 @@ numbers. Same trap as
 
 | option | default | |
 |---|---|---|
-| `color` | `'#2196f3'` | |
+| `color` | `'#db2777'` | |
 | `lineWidth` | `3` | |
 | `lineStyle` | `LineStyle.Solid` | |
 | `lineType` | `LineType.Simple` | `WithSteps`, `Curved` — [which](/start/choosing-a-series#line) |
@@ -270,10 +270,11 @@ chart.timeScale().fitContent();
 
 | option | default | |
 |---|---|---|
-| `lineColor` | `'#33d778'` | |
-| `topColor` | `'rgba(46, 220, 135, 0.4)'` | fill at the top of the range |
-| `bottomColor` | `'rgba(40, 221, 100, 0)'` | fill at the bottom |
+| `lineColor` | `'#db2777'` | |
+| `topColor` | `'rgba(219, 39, 119, 0.28)'` | fill at the top of the range |
+| `bottomColor` | `'rgba(219, 39, 119, 0.02)'` | fill at the bottom |
 | `invertFilledArea` | `false` | fill upwards from the line instead |
+| `tintAxes` | `false` | carry the fill into the price and time axis strips |
 | `lineWidth` | `3` | |
 | `lineStyle` | `LineStyle.Solid` | |
 | `lineType` | `LineType.Simple` | |
@@ -302,6 +303,55 @@ chart.timeScale().fitContent();
 ```
 
 </ChartDemo>
+
+### `tintAxes`
+
+The fill stops dead at the gutter, so a chart reads as a coloured middle with
+two grey strips bolted either side. With this on it continues into both: the
+whole thing becomes one coloured object.
+
+<ChartDemo :height="300">
+
+```js
+chart.addSeries(AreaSeries, {
+    lineColor: '#db2777',
+    topColor: 'rgba(192, 38, 211, 0.34)',
+    bottomColor: 'rgba(234, 88, 12, 0.03)',
+    lineWidth: 2,
+
+    // The dress continues past the plot.
+    tintAxes: true,
+}).setData(data.map((bar) => ({ time: bar.time, value: bar.value })));
+
+chart.timeScale().fitContent();
+```
+
+</ChartDemo>
+
+One gradient paints both strips, running from the top of the plot to the bottom
+of the chart, so a strip carries whatever colour the fill would have had there.
+Two gradients — or an extra wash over one — make it a near-match rather than a
+continuation, and the seam lands on the one edge the effect exists to remove.
+
+The price strip is filled **from the last reading downwards**, not from the top.
+That is where the fill actually reaches the gutter; filling the whole strip
+paints colour above the line, which the fill itself never does.
+
+The bottom strip runs the full width of the chart rather than stopping at the
+price axis. The square where the two meet is the only right angle on a chart,
+so an unpainted notch there is more noticeable than either strip.
+
+The axis borders are not drawn where the tint crosses them. A border marks the
+boundary between plot and gutter, and the tint is there to say that boundary is
+not a boundary — a pale line down the middle of a continuous colour is the seam
+put back, a pixel wide.
+
+**One series tints, and it is the first that asks.** Two washes over one strip
+is mud; picking by drawing order at least gives an answer you can predict and
+change.
+
+Off by default, because it is a strong look and a chart carrying a volume
+histogram or three lines beside the area is not improved by it.
 
 ## BaselineSeries
 
@@ -334,10 +384,49 @@ spread, or to the first reading for a performance chart.
 | `wickVisible` | `true` | |
 | `wickUpColor` | `'#22ab94'` | |
 | `wickDownColor` | `'#f23645'` | |
+| `bodyRadius` | `2` | corner radius in CSS pixels; `0` draws square bodies |
 
 A reading can carry `color`, `borderColor` and `wickColor` of its own, which
 overrides all of the above for that one candle — how a single bar is marked
 out without a second series.
+
+### Rounded bodies
+
+Candle bodies carry a two-pixel radius by default. Whether a body is rounded at
+all is decided by its **width**, never its height: every candle on a chart
+shares a width and none of them shares a height, so testing height too rounds a
+tall body and leaves its neighbour square at the same zoom — which does not read
+as a rule, it reads as a fault. Short bodies are protected by tapering the
+radius to a third of their height instead, so a two-pixel body gets two thirds
+of a pixel and stays a line rather than becoming a lozenge.
+
+Below about seven device pixels wide the radius is dropped entirely. A daily
+candle is five or six across, and two pixels of radius on that is most of the
+shape.
+
+`bodyRadius: 0` turns it off:
+
+<ChartDemo :height="280">
+
+```js
+const bars = data.slice(-40);
+
+chart.addSeries(CandlestickSeries, {
+    upColor: '#22ab94',
+    downColor: '#f23645',
+    borderUpColor: '#22ab94',
+    borderDownColor: '#f23645',
+    wickUpColor: '#22ab94',
+    wickDownColor: '#f23645',
+
+    // Square corners, the way most charting libraries draw them.
+    bodyRadius: 0,
+}).setData(bars);
+
+chart.timeScale().fitContent();
+```
+
+</ChartDemo>
 
 `borderVisible: false` gives the flat, borderless candle some designs prefer.
 Below about three pixels a slot the border is skipped anyway, because a border

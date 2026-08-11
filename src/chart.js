@@ -8,8 +8,11 @@ import {
     LineStyle,
     PriceLineSource,
     PriceScaleMode,
+    isRightToLeft,
 } from './options.js';
 import { FULL_BUILD } from './flags.js';
+import { attachKeyboard } from './keyboard.js';
+import { palette, watchPreferred } from './theme.js';
 import { TimeScale } from './scales.js';
 import {
     createPane,
@@ -40,6 +43,32 @@ const LABEL_PADDING_X = 6;
 
 /** Length of the mark joining an axis label to its line. */
 const TICK_MARK = 4;
+
+/** How far the point on a price badge reaches toward the level it names. */
+const BADGE_NOTCH = 5;
+
+/** How faint the "no data" line is against the chart's own text colour. */
+const PLACEHOLDER_ALPHA = 0.55;
+
+/** How near the pointer must come to a series to bring it forward, in CSS px. */
+const FOCUS_REACH = 14;
+
+/** What the others fade to while one series has the pointer. */
+const DIMMED_ALPHA = 0.25;
+
+/** How much wider than the crosshair its halo is drawn, and how faint. */
+const CROSSHAIR_HALO_WIDTH = 4;
+const CROSSHAIR_HALO_ALPHA = 0.12;
+
+/**
+ * Corner radius on the three corners away from the point.
+ *
+ * Small. The application's own controls are 8px, but a badge is eighteen tall
+ * and an 8px radius on that reads as a pill — which loses the one thing the
+ * shape is for, that it is a tag aimed at a line. Three is enough to stop the
+ * corners looking cut and not enough to soften the point.
+ */
+const BADGE_RADIUS = 3;
 const AXIS_PADDING = 12;
 const TICK_GAP = 46;
 const MIN_CLASS_SPACING = 20;
@@ -278,6 +307,59 @@ const MAGNET_OHLC = ['open', 'high', 'low', 'close'];
  * @param {number} mode
  * @return {number|null}
  */
+/**
+ * The series the pointer is nearest to, or null when it is near none of them.
+ *
+ * Used to fade everything else. Nearest by pixels rather than by draw order:
+ * a chart with four lines on it is asking the reader to follow one, and the
+ * one they are following is the one under the cursor — not the first that
+ * happens to hold a reading at this index, which is what the crosshair event
+ * already reports and is right for a different question.
+ *
+ * The reach is deliberately short. Fading three series because the pointer
+ * drifted vaguely toward a fourth is worse than not fading at all: the reader
+ * loses the comparison they came for and has no idea what they did to cause it.
+ *
+ * @param {Object} pane
+ * @param {number} index
+ * @param {number} y CSS px
+ * @param {number} reach how close the pointer has to be, in CSS px
+ * @return {Object|null}
+ */
+export function seriesUnderPointer(pane, index, y, reach) {
+    let nearest = null;
+    let best = reach;
+
+    for (const series of pane.series) {
+        if (! series.options.visible) {
+            continue;
+        }
+
+        const point = series.byIndex[index];
+
+        if (! point) {
+            continue;
+        }
+
+        for (const key of MAGNET_OHLC) {
+            const value = point[key];
+
+            if (value === null || value === undefined) {
+                continue;
+            }
+
+            const distance = Math.abs(series.scale.priceScale.priceToY(value) - y);
+
+            if (distance <= best) {
+                best = distance;
+                nearest = series;
+            }
+        }
+    }
+
+    return nearest;
+}
+
 export function magnetPrice(pane, index, y, mode, skipHidden = true) {
     if (mode !== CrosshairMode.Magnet && mode !== CrosshairMode.MagnetOHLC) {
         return null;
@@ -309,12 +391,29 @@ export function magnetPrice(pane, index, y, mode, skipHidden = true) {
 
             if (distance < shortest) {
                 shortest = distance;
-                nearest = price;
+                nearest = { price, scale: series.scale.priceScale };
             }
         }
     }
 
     return nearest;
+}
+
+/**
+ * The pixel the crosshair should snap to, or null.
+ *
+ * The price on its own is not enough. It was converted back through the pane's
+ * main scale, which is the same scale it came from only while every series is
+ * on the right-hand axis — put one on the left and the crosshair snapped to a
+ * price on one scale and drew it at the height that price occupies on another,
+ * so the badge read a number from nowhere near the chart.
+ *
+ * @return {number|null} y in CSS px
+ */
+export function magnetY(pane, index, y, mode, skipHidden = true) {
+    const snapped = magnetPrice(pane, index, y, mode, skipHidden);
+
+    return snapped === null ? null : snapped.scale.priceToY(snapped.price);
 }
 
 /**
@@ -630,6 +729,48 @@ const POINT_HIT = 2;
  * @param {Object} winner
  * @return {boolean}
  */
+/**
+ * A crosshair line, over a halo of the background it is crossing.
+ *
+ * A single hairline has to be dark enough to survive a white candle and light
+ * enough not to cut a dark one in half, and there is no colour that is both.
+ * The usual answer is to pick the darker one and accept that the line disappears
+ * over a filled body — which is the moment a reader most wants to see where it
+ * is, because that is where the price they are reading came from.
+ *
+ * So the line is drawn twice: once wider in a translucent wash of the same
+ * colour, then the hairline on top. The wash separates the line from whatever
+ * is under it without being visible as a second line, and it costs one extra
+ * stroke on a canvas that holds nothing but the crosshair.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {{color: string, width: number, style: number}} line
+ */
+function drawCrosshairLine(ctx, line, x1, y1, x2, y2) {
+    const trace = () => {
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+    };
+
+    ctx.save();
+
+    // The halo is solid whatever the line's own style is: a dashed halo is
+    // just a second dashed line, and the gaps are where the problem was.
+    ctx.setLineDash([]);
+    ctx.globalAlpha = CROSSHAIR_HALO_ALPHA;
+    ctx.strokeStyle = line.color;
+    ctx.lineWidth = line.width + CROSSHAIR_HALO_WIDTH;
+    trace();
+    ctx.restore();
+
+    ctx.strokeStyle = line.color;
+    ctx.lineWidth = line.width;
+    applyLineStyle(ctx, line.style, line.width);
+    trace();
+}
+
 function hitBeats(candidate, winner) {
     const layer = (hit) => Z_ORDER_RANK[hit.zOrder] ?? Z_ORDER_RANK.normal;
 
@@ -1074,6 +1215,14 @@ export class Chart {
                     layout: { panes: paneDefaults() },
                     leftPriceScale: leftScaleDefaults(),
                     kineticScroll: { touch: true, mouse: false },
+
+                    // Focus, arrow keys, and a live region reading each value
+                    // aloud. On by default: a chart nobody can reach without a
+                    // pointer has its prices locked behind a mouse, and that is
+                    // not something to opt into. Set false where the chart is
+                    // decoration — a sparkline has nothing to announce and
+                    // should not be a tab stop.
+                    handleKeyboard: true,
                     timeScale: {
                         // Merge readings that would land in the same pixel
                         // column when zoomed out. Off by default, matching
@@ -1090,6 +1239,7 @@ export class Chart {
                 }
                 : {},
         );
+        this.applyTheme(options?.theme);
         mergeOptions(this.options, options ?? {});
         this.timeIndex = [];
         this.timeScale = new TimeScale(this.options.timeScale);
@@ -1142,6 +1292,46 @@ export class Chart {
         this.applySize(this.options.width, this.options.height);
         this.bindEvents();
         this.scheduleRender();
+    }
+
+    /**
+     * Lays a palette under whatever the caller set.
+     *
+     * Under, not over. A caller writing `{ theme: 'dark', grid: {...} }` means
+     * their grid, and a theme applied afterwards would quietly discard it —
+     * which is the failure that makes people stop trusting a theme option and
+     * go back to setting nine colours by hand.
+     *
+     * @param {string|undefined} name
+     */
+    applyTheme(name) {
+        if (! name) {
+            return;
+        }
+
+        const colours = palette(name);
+
+        if (! colours) {
+            return;
+        }
+
+        mergeOptions(this.options, colours);
+        this.options.theme = name;
+
+        // A chart set to follow the system has to keep following it. Watched
+        // once and torn down with the chart; a reader who switches their OS
+        // theme with a chart on screen is the whole point of `auto`.
+        if (name === 'auto' && ! this.unwatchTheme) {
+            this.unwatchTheme = watchPreferred(() => {
+                mergeOptions(this.options, palette('auto'));
+                this.scheduleRender();
+            });
+        }
+
+        if (name !== 'auto' && this.unwatchTheme) {
+            this.unwatchTheme();
+            this.unwatchTheme = null;
+        }
     }
 
     buildDom() {
@@ -1441,6 +1631,7 @@ export class Chart {
         };
 
         this.timeScale.width = Math.max(0, this.plot.right - this.plot.left);
+        this.timeScale.left = this.plot.left;
 
         if (FULL_BUILD && this.panes.length > 1) {
             layoutPanes(this);
@@ -1534,7 +1725,12 @@ export class Chart {
         }
 
         if (min === Infinity) {
-            record.priceScale.setRange(0, 1);
+            // Nothing to scale. The scale still needs numbers so `priceToY`
+            // answers rather than returning NaN, and `setRange` is given
+            // something outside the finite range on purpose: it is what marks
+            // the range as invented, which is what keeps the axis from
+            // labelling an empty chart 0.00 to 1.00.
+            record.priceScale.setRange(NaN, NaN);
 
             return;
         }
@@ -1610,6 +1806,12 @@ export class Chart {
 
         const ctx = this.mainCtx;
 
+        // Here rather than in `render`, because this is where text is first
+        // measured. `measureText` reads `direction`, and the price axis sizes
+        // itself from those widths — so setting it later means the axis was
+        // laid out under one direction and painted under another.
+        ctx.direction = this.textDirection();
+
         ctx.font = this.font();
 
         // One axis column serves every pane, so it is measured against the
@@ -1671,6 +1873,7 @@ export class Chart {
         });
 
         this.drawTimeAxis(ctx, timeTicks);
+        this.drawPlaceholder(ctx);
         this.drawAxisPrimitives(ctx);
         this.emitVisibleRange();
 
@@ -1782,6 +1985,49 @@ export class Chart {
         ctx.fillRect(0, 0, this.width, this.height);
     }
 
+    /**
+     * A line of text where the data would be.
+     *
+     * Only when there is nothing at all to draw. A chart mid-fetch used to show
+     * a grid and an axis running 0.00 to 1.00, which on a financial chart is
+     * not an empty state — it is a chart stating prices it does not have. The
+     * axis is silent now, and this says why.
+     *
+     * `loading` wins over empty, and is the caller's to set: only they know a
+     * request is in flight. Without it a chart flashes "No data" on its way to
+     * having some, which reads as a failure that then corrects itself.
+     */
+    drawPlaceholder(ctx) {
+        if (this.hasReadings()) {
+            return;
+        }
+
+        const { emptyText, loadingText } = this.options.localization;
+        const text = this.options.loading ? loadingText : emptyText;
+
+        if (! text) {
+            return;
+        }
+
+        ctx.save();
+        ctx.font = this.font();
+        ctx.fillStyle = this.options.layout.textColor;
+        ctx.globalAlpha = PLACEHOLDER_ALPHA;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(
+            text,
+            (this.plot.left + this.plot.right) / 2,
+            (this.plot.top + this.plot.bottom) / 2,
+        );
+        ctx.restore();
+    }
+
+    /** Whether any series anywhere holds a reading. */
+    hasReadings() {
+        return this.allSeries.some((series) => series.points.length > 0);
+    }
+
     drawGrid(ctx, paneTicks, timeTicks) {
         const { vertLines, horzLines } = this.options.grid;
 
@@ -1843,9 +2089,22 @@ export class Chart {
             this.drawBaseLine(ctx, pane);
         }
 
+        // Only when there is something to compare against: fading on a chart
+        // with one series is a chart that dims itself for no reason.
+        const focus = pane.series.filter((series) => series.options.visible).length > 1
+            ? this.focusedSeries
+            : null;
+
         for (const series of pane.series) {
             if (! series.options.visible) {
                 continue;
+            }
+
+            const dimmed = focus !== null && focus !== undefined && series !== focus;
+
+            if (dimmed) {
+                ctx.save();
+                ctx.globalAlpha = DIMMED_ALPHA;
             }
 
             const view = FULL_BUILD ? this.conflatedView(series) : null;
@@ -1886,6 +2145,10 @@ export class Chart {
             }
 
             drawPrimitives(series.primitives, 'top', target);
+
+            if (dimmed) {
+                ctx.restore();
+            }
         }
 
         if (FULL_BUILD) {
@@ -2114,9 +2377,96 @@ export class Chart {
      * @param {{price: number, y: number}[]} ticks
      * @param {boolean} [onLeft]
      */
+    /**
+     * The series whose fill the axes borrow, or null.
+     *
+     * One, deliberately, and the first that asks. Two washes over the same
+     * strip is mud, and picking by drawing order at least gives an answer a
+     * caller can predict and change.
+     */
+    tintingSeries(pane) {
+        return pane.series.find(
+            (series) => series.options.visible && series.options.tintAxes && series.points.length,
+        ) ?? null;
+    }
+
+    /**
+     * The fill's own gradient, extended past the plot.
+     *
+     * One gradient for both strips, running from the top of the plot to the
+     * bottom of the whole chart, so a strip is painted with the colour the fill
+     * would have had there. Two gradients, or an extra alpha over one of them,
+     * and the strips are a near-match rather than a continuation — which is
+     * worse than leaving them grey, because a seam draws the eye to exactly the
+     * place the effect was supposed to disappear.
+     */
+    fillGradient(ctx, series) {
+        const options = series.options;
+        const top = options.invertFilledArea ? options.bottomColor : options.topColor;
+        const bottom = options.invertFilledArea ? options.topColor : options.bottomColor;
+
+        if (! top) {
+            return null;
+        }
+
+        const span = this.height - this.plot.top;
+        const gradient = ctx.createLinearGradient(0, this.plot.top, 0, this.height);
+
+        gradient.addColorStop(0, top);
+        gradient.addColorStop(Math.min(1, Math.max(0, (this.plot.bottom - this.plot.top) / span)), bottom ?? top);
+        gradient.addColorStop(1, bottom ?? top);
+
+        return gradient;
+    }
+
+    /**
+     * Where the fill's own top edge sits at the right-hand end of the plot.
+     *
+     * The dress reaches the gutter at the height of the last reading, not at
+     * the top of the chart — filling the whole strip paints colour above the
+     * line, which the fill itself never does, so the two stop being the same
+     * shape.
+     *
+     * @return {number|null} y in CSS px
+     */
+    fillEdge(series) {
+        const { to } = this.timeScale.visibleIndices();
+
+        for (let index = Math.min(to, series.byIndex.length - 1); index >= 0; index--) {
+            const point = series.byIndex[index];
+            const value = point?.close ?? point?.value;
+
+            if (value !== null && value !== undefined) {
+                return series.scale.priceScale.priceToY(value);
+            }
+        }
+
+        return null;
+    }
+
     drawPriceAxis(ctx, pane, record, ticks, onLeft) {
         if (! record.options.visible) {
             return;
+        }
+
+        const tinting = this.tintingSeries(pane);
+        const fillTop = tinting ? this.fillEdge(tinting) : null;
+
+        if (tinting && fillTop !== null) {
+            const gradient = this.fillGradient(ctx, tinting);
+            const from = Math.max(pane.plot.top, fillTop);
+
+            if (gradient && from < pane.plot.bottom) {
+                ctx.save();
+                ctx.fillStyle = gradient;
+                ctx.fillRect(
+                    onLeft ? 0 : this.plot.right,
+                    from,
+                    onLeft ? this.plot.left : this.width - this.plot.right,
+                    pane.plot.bottom - from,
+                );
+                ctx.restore();
+            }
         }
 
         const { borderVisible, borderColor } = record.options;
@@ -2168,7 +2518,11 @@ export class Chart {
             }
         }
 
-        if (borderVisible) {
+        // Not drawn where the tint crosses it. The border marks the boundary
+        // between plot and gutter, and the tint exists to say there isn't one —
+        // a pale line down the middle of a continuous colour is the seam the
+        // effect was removing, reintroduced a pixel wide.
+        if (borderVisible && ! tinting) {
             ctx.strokeStyle = borderColor;
             ctx.lineWidth = 1;
             ctx.beginPath();
@@ -2311,18 +2665,65 @@ export class Chart {
         ctx.fillText(title, left + LABEL_PADDING_X, top + height / 2);
     }
 
+    /**
+     * A price badge, pointed at the level it reports.
+     *
+     * A rectangle says "this number belongs to this axis". A rectangle with a
+     * point on the plot-facing edge says "this number belongs to *that line*",
+     * which is what the reader is actually asking when two badges sit close
+     * together and one of them is the live price.
+     *
+     * The point tracks `y` rather than sitting at the badge's centre. A badge
+     * near the top or bottom of the pane is nudged inside the plot so it stays
+     * whole, and a centred point would then aim a few pixels away from the
+     * level it names — visibly wrong exactly where the last price spends its
+     * time on a chart that has been scrolled.
+     */
     drawAxisBadge(ctx, pane, text, y, background, textColor, onLeft) {
         const height = this.options.layout.fontSize + 6;
         const top = Math.max(pane.plot.top, Math.min(pane.plot.bottom - height, y - height / 2));
         const left = onLeft ? 0 : this.plot.right + 1;
         const width = onLeft ? Math.max(0, this.plot.left - 1) : this.priceAxisWidth - 1;
 
+        if (width <= 0) {
+            return;
+        }
+
+        // Kept inside the badge so the shape stays convex: a point level with
+        // a corner is a triangle with a tail, not a tag.
+        const aim = Math.max(top + BADGE_NOTCH, Math.min(top + height - BADGE_NOTCH, y));
+        const notch = Math.min(BADGE_NOTCH, width);
+        const near = onLeft ? left + width : left;
+        const far = onLeft ? left : left + width;
+        const inner = onLeft ? near - notch : near + notch;
+
+        // The far corners are rounded and the point is not: the eye reads the
+        // tip as the thing doing the pointing, and a rounded tip points at
+        // everything within a few pixels of itself.
+        const radius = Math.min(BADGE_RADIUS, Math.max(0, (width - notch) / 2), height / 2);
+        const bottom = top + height;
+        const step = onLeft ? -radius : radius;
+
         ctx.fillStyle = background;
-        ctx.fillRect(left, top, width, height);
+        ctx.beginPath();
+        ctx.moveTo(near, aim);
+        ctx.lineTo(inner, top);
+        ctx.lineTo(far - step, top);
+        ctx.quadraticCurveTo(far, top, far, top + radius);
+        ctx.lineTo(far, bottom - radius);
+        ctx.quadraticCurveTo(far, bottom, far - step, bottom);
+        ctx.lineTo(inner, bottom);
+        ctx.closePath();
+        ctx.fill();
+
         ctx.fillStyle = textColor ?? contrastTextColor(background);
         ctx.textAlign = onLeft ? 'right' : 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(text, onLeft ? left + width - LABEL_PADDING_X : left + LABEL_PADDING_X - 1, top + height / 2);
+        ctx.fillText(
+            text,
+            onLeft ? far + width - notch - LABEL_PADDING_X : inner + LABEL_PADDING_X - 1,
+            top + height / 2,
+        );
     }
 
     /**
@@ -2462,6 +2863,27 @@ export class Chart {
             return;
         }
 
+        const tinting = this.tintingSeries(this.panes[0]);
+
+        if (tinting) {
+            const gradient = this.fillGradient(ctx, tinting);
+
+            // The same gradient carried on downwards, so the strip is whatever
+            // colour the fill had reached by the bottom of the plot rather
+            // than a flat band with a seam along its top edge.
+            //
+            // The full width, not just the plot's. Stopping at the price axis
+            // leaves the square where the two strips meet unpainted, and a
+            // white notch in the corner is more noticeable than either strip —
+            // it is the one right angle on the chart, so the eye goes to it.
+            if (gradient) {
+                ctx.save();
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, this.plot.bottom, this.width, this.height - this.plot.bottom);
+                ctx.restore();
+            }
+        }
+
         const { borderVisible, borderColor } = this.options.timeScale;
 
         ctx.save();
@@ -2491,7 +2913,7 @@ export class Chart {
 
         ctx.font = this.font();
 
-        if (borderVisible) {
+        if (borderVisible && ! tinting) {
             ctx.strokeStyle = borderColor;
             ctx.lineWidth = 1;
             ctx.beginPath();
@@ -2548,6 +2970,33 @@ export class Chart {
 
     /* ------------------------------------------------------------ crosshair */
 
+    /**
+     * Which way text runs, from the locale.
+     *
+     * Canvas reorders a run of Arabic on its own, but it places the run
+     * according to `direction` — so a label mixing a month name with a number
+     * comes out with the parts in the right order and the whole thing anchored
+     * to the wrong end. Set once per frame, on both canvases.
+     *
+     * The plot is never mirrored. Time runs left to right in every locale, and
+     * a reversed axis would put the newest bar where a reader of any language
+     * looks for the oldest — the direction of a time series is not a property
+     * of the language describing it.
+     */
+    textDirection() {
+        return isRightToLeft(this.options.localization.locale) ? 'rtl' : 'ltr';
+    }
+
+    /** Lets go of whichever series had the pointer, and repaints if one did. */
+    releaseFocus() {
+        if (! this.focusedSeries) {
+            return;
+        }
+
+        this.focusedSeries = null;
+        this.scheduleRender();
+    }
+
     drawCrosshair() {
         const ctx = this.overlayCtx;
 
@@ -2564,28 +3013,27 @@ export class Chart {
 
         ctx.save();
         ctx.font = this.font();
+        ctx.direction = this.textDirection();
 
         // The vertical line runs the whole height — the same bar is under the
         // cursor in every pane. The horizontal one is a price, which only means
         // something on the scale it was read from, so it stays in its pane.
         if (vertLine.visible) {
-            ctx.strokeStyle = vertLine.color;
-            ctx.lineWidth = vertLine.width;
-            applyLineStyle(ctx, vertLine.style, vertLine.width);
-            ctx.beginPath();
-            ctx.moveTo(Math.round(x) + 0.5, this.plot.top);
-            ctx.lineTo(Math.round(x) + 0.5, this.plot.bottom);
-            ctx.stroke();
+            drawCrosshairLine(
+                ctx,
+                vertLine,
+                Math.round(x) + 0.5, this.plot.top,
+                Math.round(x) + 0.5, this.plot.bottom,
+            );
         }
 
         if (horzLine.visible) {
-            ctx.strokeStyle = horzLine.color;
-            ctx.lineWidth = horzLine.width;
-            applyLineStyle(ctx, horzLine.style, horzLine.width);
-            ctx.beginPath();
-            ctx.moveTo(pane.plot.left, Math.round(y) + 0.5);
-            ctx.lineTo(pane.plot.right, Math.round(y) + 0.5);
-            ctx.stroke();
+            drawCrosshairLine(
+                ctx,
+                horzLine,
+                pane.plot.left, Math.round(y) + 0.5,
+                pane.plot.right, Math.round(y) + 0.5,
+            );
         }
 
         ctx.setLineDash([]);
@@ -2684,17 +3132,57 @@ export class Chart {
         const left = Math.max(0, Math.min(this.plot.right - width, x - width / 2));
         const background = this.options.crosshair.vertLine.labelBackgroundColor;
 
+        const top = this.plot.bottom + 1;
+
+        // Rounded to match the price badge, and pointed at the bar for the same
+        // reason: the label is about one column, and a rectangle centred under
+        // a line still has to be read against the line to know which.
+        //
+        // The point is on the top edge because that is the edge facing the
+        // plot, and it tracks `x` rather than the label's centre — a label
+        // near either end is slid inward to stay whole, and a centred point
+        // would then indicate the wrong bar.
+        const notch = BADGE_NOTCH;
+        const radius = Math.min(BADGE_RADIUS, width / 2, height / 2);
+        const shoulder = top + notch;
+        const bottom = shoulder + height;
+        const right = left + width;
+
+        // The point sits within the shoulders, so a label slid inward keeps a
+        // convex shape rather than growing a tail off one corner.
+        const aim = Math.max(left + notch + radius, Math.min(right - notch - radius, x));
+
         ctx.fillStyle = background;
-        ctx.fillRect(left, this.plot.bottom + 1, width, height);
+        ctx.beginPath();
+        ctx.moveTo(aim, top);
+        ctx.lineTo(aim + notch, shoulder);
+        ctx.lineTo(right - radius, shoulder);
+        ctx.quadraticCurveTo(right, shoulder, right, shoulder + radius);
+        ctx.lineTo(right, bottom - radius);
+        ctx.quadraticCurveTo(right, bottom, right - radius, bottom);
+        ctx.lineTo(left + radius, bottom);
+        ctx.quadraticCurveTo(left, bottom, left, bottom - radius);
+        ctx.lineTo(left, shoulder + radius);
+        ctx.quadraticCurveTo(left, shoulder, left + radius, shoulder);
+        ctx.lineTo(aim - notch, shoulder);
+        ctx.closePath();
+        ctx.fill();
+
         ctx.fillStyle = contrastTextColor(background);
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(label, left + width / 2, this.plot.bottom + 1 + height / 2);
+        ctx.fillText(label, left + width / 2, shoulder + height / 2);
     }
 
     /* --------------------------------------------------------------- events */
 
     bindEvents() {
+        // Full build only, on the same reasoning as panes and custom series:
+        // structural, and a sparkline in a table cell has no use for it.
+        if (FULL_BUILD && this.options.handleKeyboard) {
+            this.keyboard = attachKeyboard(this);
+        }
+
         this.onPointerMove = (event) => this.handlePointerMove(event);
         this.onPointerLeave = () => this.handlePointerLeave();
         this.onPointerDown = (event) => this.handlePointerDown(event);
@@ -3063,16 +3551,29 @@ export class Chart {
         }
 
         const pane = this.paneAt(point.y);
-        const snapped = magnetPrice(
+        const snapped = magnetY(
             pane,
             index,
             point.y,
             this.options.crosshair.mode,
             this.options.crosshair.doNotSnapToHiddenSeriesIndices,
         );
-        const y = snapped === null ? point.y : pane.priceScale.priceToY(snapped);
+        const y = snapped === null ? point.y : snapped;
+
+        const focus = this.options.crosshair.dimOtherSeries
+            ? seriesUnderPointer(pane, index, point.y, FOCUS_REACH)
+            : null;
 
         this.crosshair = { index, y, x: point.x, pane };
+
+        // The data canvas only repaints when the focus actually changes — the
+        // crosshair moves on every pointer event and redrawing the series with
+        // it would undo the reason there are two canvases.
+        if (focus !== this.focusedSeries) {
+            this.focusedSeries = focus;
+            this.scheduleRender();
+        }
+
         this.drawCrosshair();
         this.emitCrosshair(index, point, event);
     }
@@ -3113,6 +3614,8 @@ export class Chart {
     }
 
     clearCrosshair() {
+        this.releaseFocus();
+
         if (! this.crosshair) {
             return;
         }
@@ -3122,6 +3625,12 @@ export class Chart {
     }
 
     handlePointerLeave() {
+        // Released before the early return, not after it. The focus and the
+        // crosshair are separate state with separate lifetimes, and clearing
+        // one inside a guard on the other leaves a chart dimmed with nothing on
+        // it to explain why — until something unrelated forces a repaint.
+        this.releaseFocus();
+
         if (! this.crosshair) {
             return;
         }
@@ -3687,6 +4196,13 @@ export class Chart {
     }
 
     applyOptions(options) {
+        // The palette first, so anything alongside it in the same call still
+        // wins — `applyOptions({ theme: 'dark', grid: { … } })` is one
+        // statement and should behave like one.
+        if (options?.theme) {
+            this.applyTheme(options.theme);
+        }
+
         mergeOptions(this.options, options ?? {});
         this.timeScale.options = this.options.timeScale;
         this.updateAttribution();
@@ -3742,6 +4258,10 @@ export class Chart {
         this.element.removeEventListener('dblclick', this.onDoubleClick);
         window.removeEventListener('mousemove', this.onDragMove);
         window.removeEventListener('mouseup', this.onPointerUp);
+        this.keyboard?.destroy();
+        this.keyboard = null;
+        this.unwatchTheme?.();
+        this.unwatchTheme = null;
         this.element.removeEventListener('wheel', this.onWheel);
         this.element.removeEventListener('touchstart', this.onTouchStart);
         this.element.removeEventListener('touchmove', this.onTouchMove);

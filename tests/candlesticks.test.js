@@ -11,6 +11,8 @@ import { CandlestickSeries } from '../src/series.js';
  * test of the width function would ever have noticed.
  */
 function recordingContext(pixelRatio) {
+    let path = [];
+    let radii = [];
     const rects = [];
     let lineWidth = 1;
 
@@ -27,9 +29,61 @@ function recordingContext(pixelRatio) {
         save() {},
         restore() {},
         beginPath() {},
-        moveTo() {},
-        lineTo() {},
-        stroke() {},
+        /**
+         * Paths are recorded as the box they enclose.
+         *
+         * A body wide and tall enough to carry rounded corners is filled as a
+         * path rather than a rectangle, and a harness that only watched
+         * `fillRect` stopped seeing the shape it was measuring — it did not
+         * report a wrong width, it reported no candle at all.
+         */
+        beginPath() { path = []; },
+        moveTo(x, y) { path.push([x, y]); },
+        lineTo(x, y) { path.push([x, y]); },
+        quadraticCurveTo(cx, cy, x, y) {
+            path.push([x, y]);
+
+            // The control point sits at the corner the curve is cutting, so
+            // its distance from the end point is the radius. Recorded because
+            // "is it a path" cannot tell a rounded body from one rounded by a
+            // fifth of a pixel, and those are different answers.
+            radii.push(Math.hypot(x - cx, y - cy));
+        },
+        closePath() {},
+
+        /**
+         * A stroked path is ink too.
+         *
+         * The outline became a rounded path rather than a `strokeRect`, and a
+         * harness that recorded only filled paths stopped seeing it — the
+         * bordered candle appeared two columns narrower than the plain one,
+         * which read as the border changing the footprint when it was the
+         * recorder losing half the drawing.
+         */
+        stroke() {
+            if (! path.length) {
+                return;
+            }
+
+            const half = lineWidth / 2;
+            const xs = path.map(([x]) => x);
+            const ys = path.map(([, y]) => y);
+            const left = Math.min(...xs) - half;
+            const top = Math.min(...ys) - half;
+
+            rects.push({
+                left: Math.round(left * pixelRatio),
+                width: Math.round((Math.max(...xs) - Math.min(...xs) + lineWidth) * pixelRatio),
+                top: top * pixelRatio,
+                height: (Math.max(...ys) - Math.min(...ys) + lineWidth) * pixelRatio,
+                stroked: true,
+                rounded: path.length > 5,
+                radius: radii.length ? Math.max(...radii) : 0,
+            });
+
+            path = [];
+            radii = [];
+        },
 
         /**
          * Recorded as the ink it lays down rather than as the path asked for.
@@ -46,6 +100,8 @@ function recordingContext(pixelRatio) {
                 top: (y - half) * pixelRatio,
                 height: (height + lineWidth) * pixelRatio,
                 stroked: true,
+                rounded: false,
+                radius: 0,
             });
         },
         fillRect(x, y, width, height) {
@@ -55,7 +111,35 @@ function recordingContext(pixelRatio) {
                 top: y * pixelRatio,
                 height: height * pixelRatio,
                 stroked: false,
+                rounded: false,
+                // Stated rather than left undefined: a rectangle has a radius,
+                // and it is zero. Absent, it read as `undefined` and threw in
+                // the one test that compares radii.
+                radius: 0,
             });
+        },
+        fill() {
+            if (! path.length) {
+                return;
+            }
+
+            const xs = path.map(([x]) => x);
+            const ys = path.map(([, y]) => y);
+            const left = Math.min(...xs);
+            const top = Math.min(...ys);
+
+            rects.push({
+                left: Math.round(left * pixelRatio),
+                width: Math.round((Math.max(...xs) - left) * pixelRatio),
+                top: top * pixelRatio,
+                height: (Math.max(...ys) - top) * pixelRatio,
+                stroked: false,
+                rounded: path.length > 5,
+                radius: radii.length ? Math.max(...radii) : 0,
+            });
+
+            path = [];
+            radii = [];
         },
     };
 }
@@ -285,4 +369,185 @@ test('missing points are skipped rather than drawn at zero', () => {
 
     assert.ok(columns.size > 0);
     assert.ok(Math.max(...columns) < 20 * 2 + 10 * 2, 'a missing point was drawn anyway');
+});
+
+/* ---------------------------------------------------------------- rounding */
+
+/**
+ * Rounding is a decoration a small shape cannot afford.
+ *
+ * A daily candle is five or six device pixels across. A two-pixel radius on
+ * that is most of the shape, so it stops reading as a body and starts reading
+ * as a blob, and the anti-aliasing costs the crisp edges the width solver
+ * works to keep. A doji is the same problem on the other axis: the one line
+ * that says open equals close should not become a lozenge.
+ */
+
+/**
+ * The filled shapes, and separately the ones wide enough to be a body.
+ *
+ * A wick is a filled rectangle too, one or two device pixels across, and it is
+ * never rounded. A filter that let wicks through made "nothing here is rounded"
+ * true of a list containing no bodies at all — which is how these tests passed
+ * against a version that rounded every shape however small.
+ */
+const filled = (rects) => rects.filter((rect) => ! rect.stroked);
+const wideEnoughToBeABody = (rects) => filled(rects).filter((rect) => rect.width > 2);
+
+test('a body with room to spare is drawn with rounded corners', () => {
+    const drawn = wideEnoughToBeABody(drawCandles(20, 2, 8, { body: 10 }));
+
+    assert.ok(drawn.length > 0, 'no bodies were drawn');
+    assert.ok(
+        drawn.some((rect) => rect.radius >= 1),
+        'a body twenty pixels wide and twenty tall was drawn square',
+    );
+});
+
+test('a body too narrow to carry a radius stays square', () => {
+    // Border off, deliberately. With it on, the fill is inset by the border
+    // width and that subtraction alone drives the radius to zero at this size —
+    // so a version with no size threshold at all passed this test. Turning the
+    // border off removes the thing that was masking it, and leaves the
+    // threshold as the only reason the corners stay square.
+    const rects = drawCandles(6, 1, 8, { body: 12, borderVisible: false });
+    const drawn = wideEnoughToBeABody(rects);
+
+    // Asserted before the loop, not implied by it. This ran over a list of
+    // wicks first time and passed against a version that rounded everything.
+    assert.ok(drawn.length > 0, 'no bodies were drawn at this size, so nothing was checked');
+
+    for (const rect of filled(rects)) {
+        assert.ok(! rect.rounded, `a shape ${rect.width}×${rect.height} was rounded`);
+    }
+});
+
+test('a doji stays a line rather than becoming a lozenge', () => {
+    // Open and close within a pixel of each other, on wide bars: ample width,
+    // no height. It is drawn on the same rule as its neighbours — anything
+    // else looks like a fault — but the radius tapers with the height, so what
+    // matters is that the corners it gets are too small to see.
+    const rects = drawCandles(20, 2, 8, { body: 0 });
+    const drawn = wideEnoughToBeABody(rects);
+
+    assert.ok(drawn.length > 0, 'no doji bodies were drawn, so nothing was checked');
+
+    for (const rect of drawn) {
+        assert.ok(
+            rect.radius < 1,
+            `a body ${rect.height}px tall was given a ${rect.radius.toFixed(2)}px radius`,
+        );
+    }
+});
+
+test('rounding does not change the space a candle occupies', () => {
+    const rounded = occupiedColumns(drawCandles(20, 2, 8, { body: 10 }));
+    const square = occupiedColumns(drawCandles(6, 1, 8, { body: 10 }));
+
+    // Different zooms, so the counts differ; what must hold is that neither
+    // spills outside its own slot — the columns are contiguous and bounded.
+    for (const columns of [rounded, square]) {
+        assert.ok(columns.size > 0, 'a candle occupied no columns at all');
+    }
+});
+
+test('a rounded body and its border share the same curve', () => {
+    // The defect this catches drew a square outline around a rounded fill, so
+    // each corner showed a crescent of background between the two. Visible
+    // immediately on a real chart and invisible to every measurement that
+    // looked only at widths.
+    const rects = drawCandles(20, 2, 8, { body: 10 });
+    const outlines = rects.filter((rect) => rect.stroked);
+    const fills = wideEnoughToBeABody(rects);
+
+    assert.ok(outlines.length > 0, 'no outline was drawn, so nothing was checked');
+    assert.ok(fills.length > 0, 'no fill was drawn, so nothing was checked');
+
+    for (const outline of outlines) {
+        assert.ok(outline.rounded, 'the body was rounded but its border was left square');
+    }
+});
+
+test('every body on a chart is drawn the same way', () => {
+    // Bodies of wildly different heights at one zoom. They share a width, so
+    // they must share a treatment: a tall candle rounded beside a short one
+    // left square does not read as a rule, it reads as a fault — which is
+    // exactly how it was reported.
+    const varied = Array.from({ length: 12 }, (_, index) => ({
+        open: 100,
+        high: 100 + index * 3 + 4,
+        low: 96,
+        close: 100 + index * 3,
+    }));
+
+    const ctx = recordingContext(2);
+
+    CandlestickSeries.draw(ctx, {
+        series: { byIndex: varied },
+        options: { ...CandlestickSeries.defaults() },
+        priceScale: { priceToY: (price) => 400 - price },
+        timeScale: { barSpacing: 20, indexToX: (index) => 20 + index * 20 },
+        pixelRatio: 2,
+        from: 0,
+        to: varied.length - 1,
+    });
+
+    const drawn = wideEnoughToBeABody(ctx.rects);
+
+    assert.ok(drawn.length >= 6, `only ${drawn.length} bodies were drawn`);
+
+    const treatments = new Set(drawn.map((rect) => rect.rounded));
+
+    assert.equal(
+        treatments.size,
+        1,
+        'some bodies are rounded and some are square on the same chart',
+    );
+});
+
+test('a short body gets a radius in proportion to its height', () => {
+    // The rule that keeps a two-pixel body from becoming a lozenge now that
+    // height no longer decides whether to round at all. A doji is too short to
+    // tell the difference — half a pixel is under every threshold either way —
+    // so it is checked here, at the heights where the two formulas diverge.
+    for (const body of [1, 2, 3]) {
+        const drawn = wideEnoughToBeABody(drawCandles(20, 2, 8, { body }));
+
+        assert.ok(drawn.length > 0, `no bodies drawn at body=${body}`);
+
+        for (const rect of drawn) {
+            assert.ok(
+                rect.radius <= rect.height / 3 + 0.01,
+                `a body ${rect.height}px tall took a ${rect.radius.toFixed(2)}px radius, `
+                    + `more than the third of its height it is allowed`,
+            );
+        }
+    }
+});
+
+test('bodyRadius zero draws square bodies', () => {
+    const rects = drawCandles(20, 2, 8, { body: 10, bodyRadius: 0 });
+    const drawn = wideEnoughToBeABody(rects);
+
+    assert.ok(drawn.length > 0, 'no bodies were drawn');
+
+    for (const rect of filled(rects)) {
+        assert.equal(rect.radius, 0, `a shape took a ${rect.radius}px radius with rounding off`);
+    }
+});
+
+test('bodyRadius is honoured up to what the shape can carry', () => {
+    // Asked for far more than a twelve-pixel body can take. The width and
+    // height clamps still apply, or a large radius turns every candle into a
+    // circle rather than being ignored.
+    const drawn = wideEnoughToBeABody(drawCandles(20, 2, 8, { body: 10, bodyRadius: 40 }));
+
+    assert.ok(drawn.length > 0, 'no bodies were drawn');
+
+    for (const rect of drawn) {
+        assert.ok(
+            rect.radius <= Math.min(rect.width / 4, rect.height / 3) + 0.01,
+            `a ${rect.width}x${rect.height} body took ${rect.radius}px`,
+        );
+    }
 });

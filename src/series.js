@@ -11,7 +11,7 @@ export function commonDefaults() {
         priceLineStyle: LineStyle.Dashed,
         lastValueVisible: true,
         crosshairMarkerVisible: true,
-        crosshairMarkerRadius: 4,
+        crosshairMarkerRadius: 5,
         crosshairMarkerBorderColor: '',
         crosshairMarkerBackgroundColor: '',
         crosshairMarkerBorderWidth: 2,
@@ -51,7 +51,7 @@ function structuralDefaults() {
             // The zero line of a percentage or indexed axis. Meaningless on a
             // normal one, and not drawn there.
             baseLineVisible: true,
-            baseLineColor: '#b2b5be',
+            baseLineColor: '#a3a3a3',
             baseLineWidth: 1,
             baseLineStyle: LineStyle.Solid,
         }
@@ -217,7 +217,7 @@ export const LineSeries = {
     isBarLike: false,
     defaults: () => ({
         ...commonDefaults(),
-        color: '#2196f3',
+        color: '#db2777',
         lineWidth: 3,
         lineStyle: LineStyle.Solid,
         lineType: LineType.Simple,
@@ -242,13 +242,18 @@ export const AreaSeries = {
     isBarLike: false,
     defaults: () => ({
         ...commonDefaults(),
-        topColor: 'rgba(46, 220, 135, 0.4)',
-        bottomColor: 'rgba(40, 221, 100, 0)',
-        lineColor: '#33d778',
+        topColor: 'rgba(219, 39, 119, 0.28)',
+        bottomColor: 'rgba(219, 39, 119, 0.02)',
+        lineColor: '#db2777',
         lineWidth: 3,
         lineStyle: LineStyle.Solid,
         lineType: LineType.Simple,
         invertFilledArea: false,
+
+        // Carry this fill into the price and time axis strips, so the whole
+        // chart reads as one coloured object rather than a coloured middle
+        // between two grey gutters.
+        tintAxes: false,
         ...markerDefaults(),
     }),
     lastValueColor: (options) => options.lineColor,
@@ -367,6 +372,76 @@ const BODY_FILL = 0.72;
 /** Below this, bars are too close together for a gap to survive rounding. */
 const MIN_GAP = 1;
 
+/** Corner radius on a candle body when the options do not say, in CSS pixels. */
+const BODY_RADIUS = 2;
+
+/**
+ * Narrower than this, in device pixels, and a body is drawn square.
+ *
+ * Width only, deliberately. A daily candle is five or six device pixels across
+ * and a two-pixel radius on that is most of the shape, so below this it stops
+ * reading as a body and starts reading as a blob — and the anti-aliasing costs
+ * the crisp edges the width solver went to trouble for.
+ *
+ * Height is not part of the test even though a short body has the same problem,
+ * because every candle on a chart shares a width and none of them shares a
+ * height. Testing height too meant a tall body was rounded and its neighbour
+ * was not, on the same chart, at the same zoom — which does not read as a
+ * considered rule, it reads as a rendering fault. A short body is protected by
+ * tapering its radius instead, below.
+ */
+const MIN_ROUNDED_BODY = 7;
+
+/**
+ * A candle body, rounded when there is room for it and square when there is not.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {number} radius already in device pixels; 0 draws a plain rectangle
+ */
+function traceRoundedBox(ctx, x, y, width, height, radius) {
+    const right = x + width;
+    const bottom = y + height;
+
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(right - radius, y);
+    ctx.quadraticCurveTo(right, y, right, y + radius);
+    ctx.lineTo(right, bottom - radius);
+    ctx.quadraticCurveTo(right, bottom, right - radius, bottom);
+    ctx.lineTo(x + radius, bottom);
+    ctx.quadraticCurveTo(x, bottom, x, bottom - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+}
+
+function fillBody(ctx, x, y, width, height, radius) {
+    if (radius <= 0) {
+        ctx.fillRect(x, y, width, height);
+
+        return;
+    }
+
+    traceRoundedBox(ctx, x, y, width, height, radius);
+    ctx.fill();
+}
+
+/**
+ * How much to round a body of this size, in device pixels.
+ *
+ * @return {number} 0 when the shape is too small to carry a radius
+ */
+function cornerRadius(width, height, pixelRatio, wanted = BODY_RADIUS) {
+    if (wanted <= 0 || width < MIN_ROUNDED_BODY) {
+        return 0;
+    }
+
+    // A third of the height, so a body that is two pixels tall gets two thirds
+    // of a pixel rather than a full radius — rounded on the same rule as its
+    // neighbours, and still a line rather than a lozenge.
+    return Math.min(wanted * pixelRatio, width / 4, height / 3);
+}
+
 /**
  * Candle body width in *device* pixels.
  *
@@ -420,20 +495,42 @@ function barBodyWidth(barSpacing, pixelRatio) {
  * Every measurement here is device pixels; `scale` returns them to the CSS
  * pixels the context is drawing in.
  */
-function outlineBody(ctx, x, y, width, height, border, scale) {
+function outlineBody(ctx, x, y, width, height, border, scale, radius = 0) {
     if (width <= border * 2 || height <= border * 2) {
-        ctx.fillRect(x * scale, y * scale, width * scale, height * scale);
+        // Filled solid rather than outlined, and still rounded on the same
+        // rule as everything else. Left square here, a doji came out with
+        // corners while both its neighbours did not — the one shape on the
+        // chart drawn to a different rule, which is what the eye finds.
+        fillBody(ctx, x * scale, y * scale, width * scale, height * scale, radius);
 
         return;
     }
 
     ctx.lineWidth = border * scale;
-    ctx.strokeRect(
+
+    if (radius <= 0) {
+        ctx.strokeRect(
+            (x + border / 2) * scale,
+            (y + border / 2) * scale,
+            (width - border) * scale,
+            (height - border) * scale,
+        );
+
+        return;
+    }
+
+    // The outline follows the same curve as the fill inside it. Left square
+    // while the fill was rounded, the corners showed a notch of background
+    // between the two — nothing covered the ground the curve gave up.
+    traceRoundedBox(
+        ctx,
         (x + border / 2) * scale,
         (y + border / 2) * scale,
         (width - border) * scale,
         (height - border) * scale,
+        Math.max(0, radius - (border / 2) * scale),
     );
+    ctx.stroke();
 }
 
 export const CandlestickSeries = {
@@ -454,6 +551,11 @@ export const CandlestickSeries = {
         wickVisible: true,
         wickUpColor: '#22ab94',
         wickDownColor: '#f23645',
+
+        // Corner radius in CSS pixels; 0 draws square bodies. Applied only
+        // where the body is wide enough to carry it, and tapered on short
+        // bodies, so every candle on a chart is treated the same way.
+        bodyRadius: 2,
     }),
     lastValueColor: (options, point) => (
         point && point.close >= point.open ? options.upColor : options.downColor
@@ -522,9 +624,31 @@ export const CandlestickSeries = {
                     ?? (isUp ? options.borderUpColor : options.borderDownColor);
 
                 if (solidBorder) {
-                    ctx.fillRect(bodyLeft * scale, top * scale, (bodyRight - bodyLeft + 1) * scale, (bottom - top + 1) * scale);
+                    const boxWidth = (bodyRight - bodyLeft + 1) * scale;
+                    const boxHeight = (bottom - top + 1) * scale;
+
+                    fillBody(
+                        ctx,
+                        bodyLeft * scale,
+                        top * scale,
+                        boxWidth,
+                        boxHeight,
+                        cornerRadius(boxWidth, boxHeight, pixelRatio, options.bodyRadius),
+                    );
                 } else {
-                    outlineBody(ctx, bodyLeft, top, bodyRight - bodyLeft + 1, bottom - top + 1, borderWidth, scale);
+                    const outlineWidth = (bodyRight - bodyLeft + 1) * scale;
+                    const outlineHeight = (bottom - top + 1) * scale;
+
+                    outlineBody(
+                        ctx,
+                        bodyLeft,
+                        top,
+                        bodyRight - bodyLeft + 1,
+                        bottom - top + 1,
+                        borderWidth,
+                        scale,
+                        cornerRadius(outlineWidth, outlineHeight, pixelRatio, options.bodyRadius),
+                    );
                 }
             }
 
@@ -539,12 +663,27 @@ export const CandlestickSeries = {
             const fillBottom = bottom - inset;
 
             if (fillTop <= fillBottom) {
+                const fillWidth = (bodyRight - bodyLeft + 1 - inset * 2) * scale;
+                const fillHeight = (fillBottom - fillTop + 1) * scale;
+
                 ctx.fillStyle = point.color ?? (isUp ? options.upColor : options.downColor);
-                ctx.fillRect(
+
+                // Measured from the body, not from the inset rectangle. Sizing
+                // the radius to the fill made it smaller than the outline's,
+                // and the difference showed as a notch of background in every
+                // corner — the fill's curve cut inside the border's, and
+                // nothing covered the ground between them.
+                const bodyWidthPx = (bodyRight - bodyLeft + 1) * scale;
+                const bodyHeightPx = (bottom - top + 1) * scale;
+                const outer = cornerRadius(bodyWidthPx, bodyHeightPx, pixelRatio, options.bodyRadius);
+
+                fillBody(
+                    ctx,
                     (bodyLeft + inset) * scale,
                     fillTop * scale,
-                    (bodyRight - bodyLeft + 1 - inset * 2) * scale,
-                    (fillBottom - fillTop + 1) * scale,
+                    fillWidth,
+                    fillHeight,
+                    outer <= 0 ? 0 : Math.max(0, outer - inset * scale),
                 );
             }
         }
@@ -566,11 +705,11 @@ export const BarSeries = {
     ),
     draw(ctx, context) {
         const { series, options, priceScale, timeScale, from, to } = context;
-        const tick = Math.max(1, Math.floor(timeScale.barSpacing * 0.35));
+        const tick = Math.max(1, Math.floor(timeScale.barSpacing * 0.3));
         const source = context.conflated ?? series.byIndex;
         const step = context.step ?? 1;
 
-        ctx.lineWidth = options.thinBars ? 1 : Math.max(1, Math.floor(timeScale.barSpacing * 0.2));
+        ctx.lineWidth = options.thinBars ? 1 : Math.max(1, Math.floor(timeScale.barSpacing * 0.14));
 
         for (let index = Math.floor(from / step) * step; index <= to; index += step) {
             const point = source[index / step];
@@ -615,7 +754,7 @@ export const HistogramSeries = {
     lastValueColor: (options) => options.color,
     draw(ctx, context) {
         const { series, options, priceScale, timeScale, from, to } = context;
-        const width = Math.max(1, Math.floor(timeScale.barSpacing * 0.8));
+        const width = Math.max(1, Math.floor(timeScale.barSpacing * 0.72));
         const half = Math.floor(width / 2);
         const baseY = priceScale.priceToY(options.base);
         const source = context.conflated ?? series.byIndex;
