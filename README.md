@@ -1,6 +1,6 @@
 # Arincen Charts
 
-**The charting library an agent can read. Lighter, faster, smarter.** A financial chart that draws itself on a canvas, with zero dependencies — and your users can ask it questions, because the agent becomes their eye and hand on it.
+**The charting library an AI agent can read. Lighter, faster, smarter.** A financial chart that draws itself on a canvas, with zero dependencies — and your users can ask it questions, because the agent becomes their eye and hand on it.
 
 ![A candlestick chart with a price line. `chart.toText()` prints what is on screen as plain English — the range, the series, the last value, the high and the low. A model reads that paragraph, and `chart.annotate()` draws its answer back onto the chart as a highlighted region, a marker on the high, and a labelled resistance level.](https://raw.githubusercontent.com/arincen/arincen-charts/main/media/agent-loop.gif)
 

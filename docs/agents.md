@@ -52,6 +52,57 @@ draw the answer on it. A user who asks *"what happened in this spike?"* has
 already told you the period by zooming to it — `getVisibleRange()` is the
 question, and `annotate()` is the answer.
 
+## Why, when your application already has the data
+
+It is the right first question, and for some questions the answer is that you do
+not need any of this. *"What happened between January and February?"* is a
+question about your own data — hand the agent the rows and it will answer.
+Nothing here is trying to be your data layer.
+
+The questions this exists for are the ones the rows cannot answer, because they
+are not about the data. They are about the chart.
+
+| what the reader asks | what the data alone cannot say |
+|---|---|
+| *"Why did it spike **here**?"* | where *here* is |
+| *"What happened in the period I'm looking at?"* | which period that is |
+| *"Zoom into the March crash."* | *doing* it, rather than describing it |
+| *"Draw the trend line between these two lows."* | putting a line on a canvas, at the right coordinates |
+| *"Mark the resistance."* | and taking that one mark off again afterwards |
+| *"What is this candle?"* | which candle is under the pointer |
+
+Every one of those needs the chart to answer, and every one of them is
+chart-specific work you would otherwise write yourself:
+
+- pixel coordinates translated into a timestamp and a price, through a scale
+  that changes with every zoom
+- which readings are currently on screen, kept in step with panning
+- a model's JSON turned into markers, price lines, shaded regions and diagonal
+  lines — four unrelated drawing APIs, two of which do not exist until you write
+  them
+- an identity for each drawn thing, so the next sentence can remove one of them
+- finding the chart at all, if the code asking is not the code that built it
+
+That is the whole of it. **We are not trying to be the agent's brain — you
+already have a model, and it is better at the thinking than we would be. We are
+giving it eyes and hands on the chart.**
+
+### It is usually cheaper, too
+
+`toText()` on a visible window is a few dozen tokens. The ten thousand candles
+behind it are not. For *"what am I looking at"* questions — which are most of
+them — the shape is:
+
+> chart → compact description → model decides → asks for the specific rows it
+> actually needs
+
+rather than sending the dataset and hoping. That is fewer tokens, a smaller
+context and a faster answer.
+
+It is not a universal claim, and we will not make one: a model doing real
+arithmetic over thousands of readings needs the readings. What it saves you is
+the *unnecessary* half — the nine thousand candles nobody asked about.
+
 ## The loop
 
 ```js

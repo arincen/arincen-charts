@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: Arincen Charts
-  text: The charting library an agent can read
+  text: The charting library an AI agent can read
   tagline: Lighter, faster, smarter. 26 KB, zero dependencies, and the first charting engine that hands a model exactly what is on screen — then lets it draw the answer back. Your users ask; the agent reads the chart and answers on it.
   actions:
     - theme: brand
@@ -63,11 +63,23 @@ const chart = createChart(document.getElementById('chart'), { autoSize: true });
 
 Note the third and fourth readings — the 5th follows the 2nd. The weekend is not drawn as empty space, because bars are placed by their position in the data and never by elapsed time. That is the right default for market data and the wrong one for a sensor log.
 
-## A chart an agent can read
+## An agent's eye and hand on the chart
 
 Every charting library draws for eyes. Anything else — a language model, a
 screen reader, an alerting job — has to reach into series internals and write
 the same summary again, badly, in every project.
+
+You already have the data, and you already have a model. What neither of them
+has is the chart: **where the reader is pointing, what is on screen right now,
+and a way to put the answer back where they are looking.**
+
+> *"Why did it spike here?"* — your database cannot say where *here* is.
+> *"Zoom into the March crash."* — that is not a sentence, it is an action.
+> *"Draw the trend line between these two lows."* — somebody has to put a line
+> on a canvas at the right coordinates, and take it off again when asked.
+
+That is the whole job: the eye and the hand, not the brain.
+[Why it matters when your app already has the data](/agents#why-when-your-application-already-has-the-data).
 
 ```js
 chart.toText();

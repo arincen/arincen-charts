@@ -2573,17 +2573,21 @@ export class Chart {
         ctx.textBaseline = 'middle';
         ctx.fillStyle = this.options.layout.textColor;
 
-        // A pane below another has a hard edge at its top, and a label centred
-        // on that edge spills into the pane above — where it reads as that
-        // pane's number. The margin is half the glyph box, not half the badge:
-        // a badge carries padding a bare tick label does not, and charging the
-        // label for it costs the topmost tick of every lower pane.
-        const topLimit = FULL_BUILD && pane.plot.top > this.plot.top
-            ? pane.plot.top + this.options.layout.fontSize / 2
-            : pane.plot.top;
+        // Labels are centred on their tick, so one sitting on an edge is half
+        // drawn on the other side of it. Below another pane that means the
+        // number reads as the pane above's; at the top or bottom of the canvas
+        // it means the glyphs are simply cut in half — which is what a chart
+        // with its time axis hidden shows at both ends.
+        //
+        // The margin is half the glyph box, not half the badge: a badge carries
+        // padding a bare tick label does not, and charging the label for it
+        // costs the topmost tick of every pane.
+        const margin = this.options.layout.fontSize / 2;
+        const topLimit = pane.plot.top + margin;
+        const bottomLimit = pane.plot.bottom - margin;
 
         for (const tick of ticks) {
-            if (tick.y < topLimit || tick.y > pane.plot.bottom) {
+            if (tick.y < topLimit || tick.y > bottomLimit) {
                 continue;
             }
 
