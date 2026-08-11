@@ -162,6 +162,14 @@ function element(tag) {
 
 globalThis.document = {
     createElement: element,
+
+    // The library builds its attribution mark out of real SVG elements and a
+    // text node rather than an HTML string, because an application running
+    // under Trusted Types refuses `innerHTML`. Both belong here for the same
+    // reason every other DOM method does: the engine calls them.
+    createElementNS: (namespace, tag) => Object.assign(element(tag), { namespaceURI: namespace }),
+    createTextNode: (text) => ({ nodeType: 3, textContent: String(text), parentNode: null }),
+
     documentElement: { lang: 'en' },
 };
 

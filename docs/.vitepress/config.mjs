@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
  * links in other people's writing, which is the one kind of link you cannot go
  * back and fix.
  *
- * Sizes are written as "about twenty-two kilobytes" in prose and never as a
+ * Sizes are written as "about twenty-four kilobytes" in prose and never as a
  * precise figure. The precise figure belongs on the landing page, which reads
  * it from the shipped file at request time; a number typed into a markdown file
  * is a number that starts drifting the day after it is typed, and the first
@@ -46,7 +46,7 @@ export default defineConfig({
     outDir: '.vitepress/dist/charts',
     lang: 'en-US',
     title: 'Arincen Charts',
-    description: 'A financial chart an AI agent can read: about 22 KB, zero dependencies.',
+    description: 'A financial chart an AI agent can read: about 24 KB, zero dependencies.',
     cleanUrls: true,
     lastUpdated: true,
 

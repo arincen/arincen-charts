@@ -1,6 +1,6 @@
 {
     "name": "@arincen/charts",
-    "version": "0.1.0",
+    "version": "1.0.1",
     "description": "A financial chart an AI agent can read: about 22 KB, zero dependencies. Two builds from one codebase, and toText/annotate so a model can describe the chart and draw its answer back.",
     "license": "MIT",
     "author": "Arincen L.L.C-FZ",

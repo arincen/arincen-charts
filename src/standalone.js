@@ -9,6 +9,10 @@ import {
 } from './series.js';
 import { LineStyle, LineType, PriceLineSource, CrosshairMode, PriceScaleMode } from './options.js';
 
+// The preset belongs in a script-tag build more than anywhere else: a table
+// of sparklines is exactly the page that has no bundler.
+export { sparkline } from './sparkline.js';
+
 /**
  * Entry point for the `<script>` tag build.
  *

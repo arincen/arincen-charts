@@ -9,6 +9,8 @@ import {
 } from './series.js';
 
 export { createSeriesMarkers } from './index.js';
+export { sparkline } from './index.js';
+export { prefersReducedMotion } from './motion.js';
 export { createTooltip } from './tooltip.js';
 export { LineStyle, LineType, LastPriceAnimationMode, PriceLineSource, CrosshairMode, PriceScaleMode } from './options.js';
 export { FULL_BUILD } from './flags.js';

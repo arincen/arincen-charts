@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { attributionStyle } from '../src/mark.js';
+import { attributionStyle, ATTRIBUTION_URL } from '../src/mark.js';
 import { chartDefaults } from '../src/options.js';
 
 const layout = { fontFamily: 'Helvetica', textColor: '#191919' };
@@ -45,4 +45,85 @@ test('it takes the chart s own type and colour rather than imposing its own', ()
 
 test('it is positioned absolutely, so it cannot push the chart around', () => {
     assert.match(attributionStyle(layout, 'en'), /position:absolute/);
+});
+
+/* ------------------------------------------------------------ where it goes */
+
+/**
+ * The badge is the only marketing this library does, and until it was tagged
+ * its traffic was indistinguishable from every other visit to that page — so
+ * the question "is the badge worth keeping on by default" had no evidence
+ * behind it either way.
+ */
+test('the mark links to a page on our own site, over https', () => {
+    const url = new URL(ATTRIBUTION_URL);
+
+    assert.equal(url.protocol, 'https:');
+    assert.match(url.hostname, /arincen\.com$/);
+    assert.equal(url.pathname, '/arincen-charts');
+});
+
+test('and carries a campaign parameter, so the traffic can be counted', () => {
+    assert.equal(new URL(ATTRIBUTION_URL).searchParams.get('utm_source'), 'chart-badge');
+});
+
+test('one parameter, not three — this string ships in a bundle measured to the byte', () => {
+    // The full utm_source/medium/campaign triple put the light build over its
+    // ceiling by twenty-one bytes. Every tool attributes on the source alone.
+    assert.equal([...new URL(ATTRIBUTION_URL).searchParams].length, 1);
+});
+
+test('the parameters are plain utm keys, which every analytics tool reads', () => {
+    // Not a scheme of our own: a reader can see what is being tracked and
+    // strip it, and no tool needs configuring to receive it.
+    for (const [key] of new URL(ATTRIBUTION_URL).searchParams) {
+        assert.match(key, /^utm_/, `${key} is not a utm parameter`);
+    }
+});
+
+/* --------------------------------------------------------- clear of the axis */
+
+/**
+ * The mark used to sit six pixels off the bottom edge, which is inside the
+ * strip the time labels are drawn in — so on any chart with a visible time
+ * axis, the first date was painted straight through it. Found by looking at a
+ * demo of somebody else's page, which is the only place the default
+ * configuration gets looked at.
+ */
+test('it sits above the time axis, not in it', async () => {
+    const { container } = await import('./support/headless-dom.js');
+    const { createChart, LineSeries } = await import('../src/index.js');
+
+    const chart = createChart(container(), { width: 600, height: 300 });
+
+    chart.addSeries(LineSeries, {}).setData([
+        { time: '2024-01-01', value: 100 },
+        { time: '2024-01-02', value: 101 },
+    ]);
+
+    chart._internal.render();
+
+    const bottom = Number(/bottom:(\d+)px/.exec(chart._internal.attributionMark.style.cssText)[1]);
+    const axisHeight = chart._internal.height - chart._internal.plot.bottom;
+
+    assert.ok(axisHeight > 6, 'this chart has no time axis to clear');
+    assert.ok(bottom >= axisHeight, `the mark sits at ${bottom}px, inside a ${axisHeight}px axis`);
+});
+
+test('and returns to the edge when there is no axis to clear', async () => {
+    const { container } = await import('./support/headless-dom.js');
+    const { createChart, LineSeries } = await import('../src/index.js');
+
+    const chart = createChart(container(), {
+        width: 600,
+        height: 300,
+        timeScale: { visible: false },
+    });
+
+    chart.addSeries(LineSeries, {}).setData([{ time: '2024-01-01', value: 100 }]);
+    chart._internal.render();
+
+    // A sparkline has no axis, and a mark floating twenty pixels up in an
+    // empty corner would look like a mistake.
+    assert.match(chart._internal.attributionMark.style.cssText, /bottom:6px/);
 });

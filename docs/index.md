@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Arincen Charts
   text: Financial charts an AI agent can read
-  tagline: 22 KB, zero dependencies, and the first charting engine that hands a model exactly what is on screen — then draws its answer back onto the chart.
+  tagline: 24 KB, zero dependencies, and the first charting engine that hands a model exactly what is on screen — then draws its answer back onto the chart.
   actions:
     - theme: brand
       text: Get started
@@ -16,7 +16,7 @@ hero:
 features:
   - title: An agent can read it
     details: chart.toText() hands a model exactly what is on screen, in words. chart.toImage() hands it the picture. chart.annotate() draws the answer back. No API key, no bundled model, no provider to be tied to.
-  - title: 22 KB, and it is measured
+  - title: 24 KB, and it is measured
     details: A test gzips the shipped bundle and fails if any size written anywhere on this site is not the one it measured. That heading drifted four kilobytes before the test existed.
   - title: No dependencies
     details: Nothing to audit, update, or have a CVE filed against. The whole library is one file with no imports outside itself.

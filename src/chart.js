@@ -42,7 +42,7 @@ import { drawMarkers, nearestIndex } from './markers.js';
 import { createRenderTarget, drawPrimitives } from './render-target.js';
 import { contrastTextColor } from './colors.js';
 import { createLongPress, trackingPoint, startKineticScroll } from './touch.js';
-import { createAttributionMark } from './mark.js';
+import { placeAttributionMark, createAttributionMark } from './mark.js';
 
 const LABEL_PADDING_X = 6;
 
@@ -1424,6 +1424,15 @@ export class Chart {
             this.attributionMark.remove();
             this.attributionMark = null;
         }
+
+        // Clear of the time axis, whatever height it has taken. Six pixels off
+        // the bottom put the mark inside the strip the dates are drawn in, and
+        // the first label went straight through it.
+        placeAttributionMark(
+            this.attributionMark,
+            this.options.layout,
+            Math.max(6, this.height - this.plot.bottom + 4),
+        );
     }
 
     applySize(width, height) {
@@ -1687,6 +1696,16 @@ export class Chart {
 
         this.timeScale.width = Math.max(0, this.plot.right - this.plot.left);
         this.timeScale.left = this.plot.left;
+
+        // Here rather than only in `updateAttribution`: the time axis changes
+        // height with the font, with `timeVisible`, and with whether it is
+        // drawn at all, and the mark has to stay clear of it through every one
+        // of those.
+        placeAttributionMark(
+            this.attributionMark,
+            this.options.layout,
+            Math.max(6, this.height - this.plot.bottom + 4),
+        );
 
         if (FULL_BUILD && this.panes.length > 1) {
             layoutPanes(this);
