@@ -1,10 +1,10 @@
 # Arincen Charts
 
+**The first chart library an agent can read and draw on.** A financial chart that draws itself on a canvas, with zero dependencies.
+
+![A candlestick chart with a price line. `chart.toText()` prints what is on screen as plain English — the range, the series, the last value, the high and the low. A model reads that paragraph, and `chart.annotate()` draws its answer back onto the chart as a highlighted region, a marker on the high, and a labelled resistance level.](https://raw.githubusercontent.com/arincen/arincen-charts/main/media/agent-loop.gif)
+
 [Documentation](https://docs.arincen.com/charts) · [Overview](https://en.arincen.com/charts)
-
-A financial chart that draws itself on a canvas, in about **24 KB gzipped**, with **zero dependencies**.
-
-Both numbers are checked rather than claimed: a test gzips the shipped bundle and fails if it has grown past its budget or if the figure written here is not the one it measured, and there is nothing in `dependencies` to audit.
 
 ## A chart an agent can read
 
@@ -24,26 +24,11 @@ No API key, no bundled model, no provider you are tied to. What is missing every
 
 [The whole loop](https://docs.arincen.com/charts/recipes/ai).
 
-## Two builds from one codebase
-
-The unusual part. Most of what a charting library carries is structural — panes, non-linear price scales, custom series — and most pages never use any of it. Tree-shaking cannot remove it, because the core genuinely references it and a bundler cannot prove your page has one pane.
-
-So the split is made at build time:
-
-| | size | has |
-|---|---|---|
-| `@arincen/charts` | ~24 KB | line, area, candlestick, bar, histogram, baseline · crosshair · markers · price lines · primitives · pan/zoom |
-| `@arincen/charts/full` | ~33 KB | all of that, plus panes, logarithmic / percentage / indexed price scales, left and overlay scales, custom series, watermarks, touch tracking, kinetic scroll |
-
-```js
-import { createChart, AreaSeries } from '@arincen/charts';
-// or, when you need panes or a second price scale:
-import { createChart, AreaSeries } from '@arincen/charts/full';
-```
-
-Nothing changes but the import. The light build simply does not contain the code for what it leaves out — `panes` is not a method that returns empty, it is absent.
-
 ## Getting started
+
+```sh
+npm install @arincen/charts
+```
 
 ```js
 import { createChart, AreaSeries } from '@arincen/charts';
@@ -68,6 +53,27 @@ Or from a script tag, with no build step:
     chart.addAreaSeries({}).setData(data);
 </script>
 ```
+
+## Two builds from one codebase
+
+The unusual part. Most of what a charting library carries is structural — panes, non-linear price scales, custom series — and most pages never use any of it. Tree-shaking cannot remove it, because the core genuinely references it and a bundler cannot prove your page has one pane.
+
+So the split is made at build time:
+
+| | size | has |
+|---|---|---|
+| `@arincen/charts` | ~24 KB | line, area, candlestick, bar, histogram, baseline · crosshair · markers · price lines · primitives · pan/zoom |
+| `@arincen/charts/full` | ~33 KB | all of that, plus panes, logarithmic / percentage / indexed price scales, left and overlay scales, custom series, watermarks, touch tracking, kinetic scroll |
+
+```js
+import { createChart, AreaSeries } from '@arincen/charts';
+// or, when you need panes or a second price scale:
+import { createChart, AreaSeries } from '@arincen/charts/full';
+```
+
+Nothing changes but the import. The light build simply does not contain the code for what it leaves out — `panes` is not a method that returns empty, it is absent.
+
+Both figures are gzipped, and both are checked rather than claimed: a test gzips the shipped bundle and fails if it has grown past its budget, or if a number written anywhere in these pages is not the one it measured. There is nothing in `dependencies` to audit.
 
 ## Drawing your own things
 
