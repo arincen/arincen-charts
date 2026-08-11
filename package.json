@@ -1,7 +1,7 @@
 {
     "name": "@arincen/charts",
     "version": "1.0.3",
-    "description": "A financial chart an AI agent can read: about 22 KB, zero dependencies. Two builds from one codebase, and toText/annotate so a model can describe the chart and draw its answer back.",
+    "description": "The charting library an AI agent can read. Lighter, faster, smarter: about 25 KB, zero dependencies. Two builds from one codebase, and toText/annotate so a model can read the chart and draw its answer back.",
     "license": "MIT",
     "author": "Arincen L.L.C-FZ",
     "homepage": "https://en.arincen.com/arincen-charts",

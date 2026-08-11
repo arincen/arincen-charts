@@ -46,7 +46,7 @@ export default defineConfig({
     outDir: '.vitepress/dist/charts',
     lang: 'en-US',
     title: 'Arincen Charts',
-    description: 'A financial chart an AI agent can read: about 25 KB, zero dependencies.',
+    description: 'The charting library an AI agent can read. Lighter, faster, smarter: about 25 KB, zero dependencies.',
     cleanUrls: true,
     lastUpdated: true,
 
@@ -69,6 +69,7 @@ export default defineConfig({
 
         nav: [
             { text: 'Start', link: '/start/', activeMatch: '/start/' },
+            { text: 'Agents', link: '/agents', activeMatch: '/agents' },
             { text: 'Guides', link: '/guide/series', activeMatch: '/guide/' },
             { text: 'Frameworks', link: '/frameworks/react', activeMatch: '/frameworks/' },
             { text: 'Plugins', link: '/plugins/', activeMatch: '/plugins/' },
@@ -85,6 +86,15 @@ export default defineConfig({
                     { text: 'Choosing a series', link: '/start/choosing-a-series' },
                     { text: 'Live data', link: '/start/live-data' },
                     { text: 'Coming from lightweight-charts', link: '/start/migrating' },
+                ],
+            },
+            {
+                // Its own section, second, rather than the last line of
+                // Recipes. It is the reason to choose this library over any
+                // other, and a reader should not have to go looking for it.
+                text: 'Agents',
+                items: [
+                    { text: 'An agent\'s eye and hand', link: '/agents' },
                 ],
             },
             {
@@ -132,7 +142,6 @@ export default defineConfig({
                     { text: 'A live streaming chart', link: '/recipes/streaming' },
                     { text: 'A sparkline', link: '/recipes/sparkline' },
                     { text: 'Downloading the chart', link: '/recipes/export' },
-                    { text: 'A chart an agent can read', link: '/recipes/ai' },
                 ],
             },
             {

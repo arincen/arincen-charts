@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: Arincen Charts
-  text: Financial charts an AI agent can read
-  tagline: 25 KB, zero dependencies, and the first charting engine that hands a model exactly what is on screen — then draws its answer back onto the chart.
+  text: The charting library an agent can read
+  tagline: Lighter, faster, smarter. 25 KB, zero dependencies, and the first charting engine that hands a model exactly what is on screen — then lets it draw the answer back. Your users ask; the agent reads the chart and answers on it.
   actions:
     - theme: brand
       text: Get started
@@ -14,8 +14,10 @@ hero:
       link: https://github.com/arincen/arincen-charts
 
 features:
-  - title: An agent can read it
-    details: chart.toText() hands a model exactly what is on screen, in words. chart.toImage() hands it the picture. chart.annotate() draws the answer back. No API key, no bundled model, no provider to be tied to.
+  - title: An agent can see it
+    details: chart.toText() hands a model exactly what is on screen, in words. chart.toImage() hands it the picture. No API key, no bundled model, no provider to be tied to.
+  - title: And an agent can work it
+    details: chart.annotate() draws the answer back as markers, levels and regions. setVisibleRange() looks closer. setCrosshairPosition() points. The verbs are ordinary API — an agent is just the first caller that needed all of them named together.
   - title: 25 KB, and it is measured
     details: A test gzips the shipped bundle and fails if any size written anywhere on this site is not the one it measured. That heading drifted four kilobytes before the test existed.
   - title: No dependencies
@@ -97,7 +99,7 @@ library, no provider you are tied to. What was missing everywhere else is the
 boring half — getting the numbers *out* in a form something can reason about,
 and getting an answer *back* onto the canvas.
 
-[The whole loop, with a chart you can press](/recipes/ai).
+[The whole loop, with a chart you can press](/agents).
 
 ## Why another charting library
 

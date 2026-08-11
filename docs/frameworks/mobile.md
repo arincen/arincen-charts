@@ -192,4 +192,4 @@ time in ours.
 
 - [No build step](/frameworks/script-tag) — the same standalone build, on the web
 - [Crosshair and interaction](/guide/interaction#touch) — the touch options in full
-- [A chart an agent can read](/recipes/ai) — `toText` is the same call in a WebView
+- [A chart an agent can read](/agents) — `toText` is the same call in a WebView

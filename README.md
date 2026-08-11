@@ -1,28 +1,36 @@
 # Arincen Charts
 
-**The first chart library an agent can read and draw on.** A financial chart that draws itself on a canvas, with zero dependencies.
+**The charting library an agent can read. Lighter, faster, smarter.** A financial chart that draws itself on a canvas, with zero dependencies — and your users can ask it questions, because the agent becomes their eye and hand on it.
 
 ![A candlestick chart with a price line. `chart.toText()` prints what is on screen as plain English — the range, the series, the last value, the high and the low. A model reads that paragraph, and `chart.annotate()` draws its answer back onto the chart as a highlighted region, a marker on the high, and a labelled resistance level.](https://raw.githubusercontent.com/arincen/arincen-charts/main/media/agent-loop.gif)
 
 [Documentation](https://docs.arincen.com/charts) · [Overview](https://en.arincen.com/charts)
 
-## A chart an agent can read
+## The eye and the hand
 
 Every charting library draws for eyes. Anything else — a language model, a screen reader, an alerting job — has to reach into series internals and write the same summary again in every project.
 
 ```js
+// see
 chart.toText();     // what is on screen, in words, deterministic and free of judgement
 chart.toImage();    // the same thing as a PNG, for a vision model
+chart.timeScale().getVisibleRange();   // the period being looked at
+
+// act
 chart.annotate([    // the answer, back on the chart
     { from, to, text },      // a region
     { time, price, text },   // a point
     { price, text },         // a level
 ]);
+chart.timeScale().setVisibleRange({ from, to });   // look closer
+chart.setCrosshairPosition(price, time, series);   // point at this
 ```
 
 No API key, no bundled model, no provider you are tied to. What is missing everywhere else is the boring half — getting the numbers *out* in a form something can reason about, and getting an answer *back* onto the canvas.
 
-[The whole loop](https://docs.arincen.com/charts/recipes/ai).
+A user who zooms to a spike and asks what happened there has already told you the period. `getVisibleRange()` is the question; `annotate()` is the answer.
+
+[The whole loop, with tool definitions ready to paste](https://docs.arincen.com/charts/agents).
 
 ## Getting started
 
