@@ -10,6 +10,9 @@ hero:
       text: Get started
       link: /start/
     - theme: alt
+      text: See it running
+      link: https://en.arincen.com/arincen-charts
+    - theme: alt
       text: View on GitHub
       link: https://github.com/arincen/arincen-charts
 
@@ -120,3 +123,10 @@ Because most of what a financial charting library carries, most pages never use.
 So the removal happens earlier, at build time. `@arincen/charts` does not contain the code for what it leaves out. `chart.panes` is not a method that returns an empty array — it does not exist.
 
 That is the whole idea. Everything else is a charting library.
+
+## Twenty-one of them, running
+
+The [Arincen Charts page](https://en.arincen.com/arincen-charts) draws every
+series type, both builds, the agent loop and the tooltip — live, on one page,
+from the same file this documentation demonstrates. It is the fastest way to see
+whether it draws what you need before you install anything.

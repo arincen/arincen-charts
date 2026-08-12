@@ -187,8 +187,13 @@ export default defineConfig({
         // reads. In the global footer it also appeared on the twenty-five
         // pages that never mention them, which met no obligation and printed a
         // competitor's brand on every page of our own documentation.
+        // The link to the library's own page belongs here rather than only on
+        // the home page: these thirty pages are the most relevant writing about
+        // it anywhere, and until now not one of them pointed at it.
         footer: {
-            message: 'Released under the MIT licence.',
+            message: 'Released under the MIT licence. '
+                + '<a href="https://en.arincen.com/arincen-charts">Arincen Charts</a> '
+                + 'is built by <a href="https://en.arincen.com">Arincen</a>.',
             copyright: 'Copyright © 2026 Arincen L.L.C-FZ',
         },
     },

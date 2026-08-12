@@ -4,7 +4,7 @@
 
 ![A candlestick chart with a price line. `chart.toText()` prints what is on screen as plain English — the range, the series, the last value, the high and the low. A model reads that paragraph, and `chart.annotate()` draws its answer back onto the chart as a highlighted region, a marker on the high, and a labelled resistance level.](https://raw.githubusercontent.com/arincen/arincen-charts/main/media/agent-loop.gif)
 
-[Documentation](https://docs.arincen.com/charts) · [Overview](https://en.arincen.com/charts)
+[Arincen Charts](https://en.arincen.com/arincen-charts) · [Documentation](https://docs.arincen.com/charts)
 
 ## The eye and the hand
 
