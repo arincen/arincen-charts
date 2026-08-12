@@ -85,7 +85,19 @@ export default defineConfig({
                     { text: 'Your first chart', link: '/start/first-chart' },
                     { text: 'Choosing a series', link: '/start/choosing-a-series' },
                     { text: 'Live data', link: '/start/live-data' },
-                    { text: 'Coming from lightweight-charts', link: '/start/migrating' },
+                ],
+            },
+            {
+                // Four of them rather than one. Every charting library worth
+                // moving from has its own vocabulary, and a reader arriving
+                // from Chart.js should not have to read a page about somebody
+                // else's API to find out whether the data shape fits.
+                text: 'Coming from',
+                items: [
+                    { text: 'lightweight-charts', link: '/start/migrating' },
+                    { text: 'Chart.js', link: '/start/from-chartjs' },
+                    { text: 'ApexCharts', link: '/start/from-apexcharts' },
+                    { text: 'Highcharts Stock', link: '/start/from-highcharts' },
                 ],
             },
             {
