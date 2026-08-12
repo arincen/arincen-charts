@@ -90,10 +90,12 @@ Honestly, so you find out here rather than mid-migration:
 
 All three measured the same way — gzip level 9 over the standalone build each
 project ships. The last row is measured rather than quoted: their README says
-about thirty-five kilobytes, which was true of version 4.
+about thirty-five kilobytes, which was true of version 4. It was taken from
+v5.2 on 2026-08-12 and is not re-measured on every run, because we no longer
+install their package for anything.
 
-A test measures ours on every run and fails if any number written in these
-docs is not what the bundle actually is.
+Ours are. A test measures both of our bundles on every run and fails if any
+number written in these docs is not what the bundle actually is.
 
 ## Moving across
 

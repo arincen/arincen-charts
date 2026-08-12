@@ -18,7 +18,7 @@ import {
  * is what the site loads — everything else in this suite runs with the flag
  * on, so a break confined to the light build would pass all of it.
  *
- * These mirror `LightweightChart.vue`, `InstrumentChart.vue` and
+ * These mirror `ArincenChart.vue`, `InstrumentChart.vue` and
  * `Blocks/LineChart.vue` rather than testing them: a copy of a configuration
  * can drift from the component it was copied from. It still answers the
  * question a deploy asks — does the engine draw what this site asks it to —
