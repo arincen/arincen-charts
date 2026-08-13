@@ -50,6 +50,14 @@ export default defineConfig({
     cleanUrls: true,
     lastUpdated: true,
 
+    // Thirty-odd pages, none of them linked from anywhere with authority yet.
+    // A crawler will find them eventually by following the sidebar; a sitemap
+    // is how it finds them now, and how it learns which ones changed.
+    // The trailing `/charts/` is load-bearing: VitePress joins each page onto
+    // the hostname as a relative path, so a bare origin here produces
+    // `docs.arincen.com/agents` — thirty URLs that all 404.
+    sitemap: { hostname: 'https://docs.arincen.com/charts/' },
+
     // The site's own favicon files, copied rather than redrawn. A second mark
     // that merely resembles the first is how a brand ends up with two.
     head: [

@@ -22,6 +22,21 @@ writeFileSync(
 );
 
 /**
+ * `robots.txt`, which only counts at the root of a host.
+ *
+ * Its job here is the last line: a crawler that has never seen a link to this
+ * subdomain still learns where the sitemap is. The sitemap itself is written by
+ * VitePress inside `/charts/`, which is correct — a sitemap may only list URLs
+ * under its own path unless it is declared in robots.txt, and this declares it.
+ */
+writeFileSync(
+    '.vitepress/dist/robots.txt',
+    'User-agent: *\n'
+    + 'Allow: /\n\n'
+    + 'Sitemap: https://docs.arincen.com/charts/sitemap.xml\n',
+);
+
+/**
  * The favicon, at the root of the host as well as inside `/charts`.
  *
  * Google supports one favicon per *host*, and finds it either from a
